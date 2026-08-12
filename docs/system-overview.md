@@ -33,6 +33,20 @@
 
   **Významná asymetrie mezi jednotkami** — Horní aktivuje mnohem později (3,48 V vs. 3,35 V) a i po aktivaci vyrovnává 8× pomaleji (0,5 A vs. 4 A) než Dolní. To je potenciálně důležitý dílek k [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md): pokud incident vznikl na Horním stringu, dává to smysl — ten string má balancer nastavený tak, že má výrazně menší šanci stihnout vyrovnat rozjezd před tím, než článek narazí na OV, i nezávisle na historii se 96% capem.
 
+### Doporučené nastavení (sjednocené, ke zvážení)
+
+Cíl: obě jednotky se chovají stejně, žádná není systematicky slabší. Návrh — **stejné hodnoty na obou**:
+
+| Parametr | Doporučená hodnota | Zdůvodnění |
+|---|---|---|
+| RunVol (V) | **3,400** | Nižší než dosavadní Horní (3,480), takže začne pracovat s větší časovou rezervou před OV. Vyšší než dosavadní Dolní (3,350) by šlo taky, ale bezpečnější je vzít nižší z obou hodnot, ne průměr — čím dřív balancer nastoupí, tím víc času má. |
+| StopVol (V) | **3,300** | 100 mV hystereze pod RunVol — konzistentní okno pro obě jednotky. |
+| Startup DifVol (V) | **0,005** | Hodnota z Dolní jednotky — citlivější spuštění, zachytí menší rozjezd dřív než 0,010 V na Horní. |
+| Stop DifVol (V) | 0,000 | Needitovatelné na obou, není co měnit. |
+| Max EquCur (A) | **4,0** | Zrychlí Horní jednotku 8×. **Než to nastavíte, ověřte, že je Horní hardwarově na 4 A skutečně dimenzovaná** — pokud je to jiná/slabší revize jednotky, nechte ji na jejím bezpečném maximu místo kopírování čísla od Dolní. |
+
+⚠️ Tohle je odvozené doporučení, ne ověřená bezpečná hodnota — **než se to aplikuje, ideálně potvrdit OV warning threshold v n-BMS** (viz [checklist](../diagnostics/checklist.md)) a mít jistotu, že 3,400 V start má dostatečnou rezervu pod ním. Po aplikaci sledovat chování stejně jako v [rebalancing-procedure.md](rebalancing-procedure.md).
+
 ## Řízení / automatizace
 
 - Node-RED běžící (dříve) s vlastní logikou omezující nabíjení — viz [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md) pro historii a důvod, proč byla tato konkrétní automatizace problematická.

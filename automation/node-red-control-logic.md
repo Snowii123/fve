@@ -18,9 +18,9 @@ Přesné cesty je nutné ověřit přes dbus-spy na konkrétním systému — li
 
 ## Řídicí logika (state machine)
 
-Prahy (nutno potvrdit z datasheetů — viz checklist):
-- `V_bal` — aktivační napětí Enerkey balanceru (odhad ~3,40–3,45 V)
-- `V_warn` — měkký OV warning práh v n-BMS (musí být níž než tvrdý disconnect)
+Prahy:
+- `V_bal` — aktivační napětí Enerkey balanceru. Doporučené sjednocené nastavení obou jednotek je **3,400 V** (viz [system-overview.md](../docs/system-overview.md#doporučené-nastavení-sjednocené-ke-zvážení)) — pokud se aplikuje, použít tuhle hodnotu; do té doby jsou obě jednotky odlišné (Horní 3,480 V, Dolní 3,350 V), takže logika by musela brát v potaz obě zvlášť podle stringu.
+- `V_warn` — měkký OV warning práh v n-BMS (musí být níž než tvrdý disconnect) — zatím neověřeno, viz [checklist](../diagnostics/checklist.md).
 - `spread_target` — cílový rozjezd, kdy je pack "dost vybalancovaný" (orientačně 20–30 mV)
 
 Smyčka běží každých 30–60 s během nabíjení blízko vrcholu:
@@ -53,15 +53,11 @@ elif MaxCellVoltage >= V_warn - margin:
 
 Přes Node-RED (dbus-listener/dbus-out node nebo MQTT do Venus broker) zapisovat do DVCC nastavení max. nabíjecího proudu — přesná cesta (typicky pod `com.victronenergy.settings/Settings/SystemSetup/...` nebo ESS `CGwacs/...`) je nutné ověřit přes dbus-spy. Zapisovat **jen při změně stavu**, ne v každém cyklu.
 
-### Pozorovaný problém: nastavený limit se neprojevuje spolehlivě
+### Pozorovaný problém: nastavený proudový limit se neprojevuje spolehlivě
 
-V praxi bylo zjištěno, že nastavení 2 A v **GX Remote Console → Settings → DVCC** (přepínač "Limit managed battery charge current" **potvrzeně zapnutý**, hodnota 2 A vyplněná) přesto neodpovídá reálně měřenému proudu — občas naskočí až na **~30 A**. Teorie s vypnutým přepínačem je tedy **vyvrácena**.
+V praxi bylo zjištěno, že nastavení 2 A v GX Remote Console → DVCC (přepínač i hodnota potvrzeně aktivní) přesto neodpovídá reálně měřenému proudu — občas naskočí až na ~30 A. Tohle je projev širšího problému (Fronius 17,5 kW výrazně předimenzovaný vůči ~400 Ah packu), který se řeší jako **samostatná kapitola** — viz [`fronius/README.md`](../fronius/README.md), včetně hypotézy příčiny a další diagnostiky.
 
-**Nová vedoucí hypotéza**: zpoždění/nepřesnost regulace přebytku z AC-coupled Fronia. DVCC řídí přebytečný PV výkon z AC-coupled zdroje nepřímo — přes frequency-shift power control (posun frekvence sítě na výstupu Multiplusů, na což Fronius reaguje omezením výkonu). Tahle regulační smyčka má reálné zpoždění a setrvačnost — při rychlé změně PV výkonu (např. hrana mraku, prudké projasnění) může nabíjecí proud **krátkodobě přestřelit** nad nastavený limit, než se smyčka stihne dorovnat zpět. Rozdíl 2 A → 30 A (15×) je na první pohled hodně, ale u 17,5kW pole při skokové změně ozáření to není nereálné.
-
-**Jak to ověřit** (viz i [checklist](../diagnostics/checklist.md)): logovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem přes Node-RED. Pokud špičky na 30 A časově sedí se skokovými nárůsty PV výkonu, hypotéza se potvrzuje. Pokud špičky nastávají i za stabilního PV výkonu, je potřeba hledat jinou příčinu (např. souběh s jiným zdrojem nabíjení, nebo že DVCC limit reaguje jen na Multiplusy, ne na všechny cesty, kterými proud do packu teče).
-
-➡️ Pro automatizaci to znamená: i correctly zapsaný limit (číslo + zapnutý přepínač) nemusí být za všech okolností dodržen na 100 % přesně u AC-coupled PV zdroje — řídicí logika v [state machine výše](#řídicí-logika-state-machine) by měla počítat s tím, že `MaxChargeCurrent` je horní mez s určitou tolerancí/zpožděním, ne garance na ampér přesně. To zvyšuje důležitost sledování `MaxCellVoltage` jako nezávislé pojistky (viz sekce výše) — i kdyby proudový limit občas přestřelil, napěťová brzda musí zafungovat spolehlivě.
+➡️ Důsledek pro tuhle automatizaci: `MaxChargeCurrent` nelze považovat za garanci na ampér přesně, dokud se Fronius problém nevyřeší — je to horní mez s určitou tolerancí/zpožděním. To zvyšuje důležitost sledování `MaxCellVoltage` jako nezávislé pojistky (viz state machine výše) — i kdyby proudový limit občas přestřelil, napěťová brzda musí zafungovat spolehlivě.
 
 ## Nasazení na Cerbu
 
