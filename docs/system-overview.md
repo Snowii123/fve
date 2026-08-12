@@ -16,7 +16,7 @@
 ## BMS a balancing
 
 - **n-BMS** — komunikuje po CAN-bus přímo do Venus OS jako *managed battery* (Victron battery service). SOC, CCL (charge current limit) a DCL (discharge current limit) hlásí BMS, Victron/DVCC je jen konzumuje a řídí se jimi — SOC tedy **nepočítá Victron sám** (na rozdíl od systémů se SmartShunt/BMV, kde SOC počítá coulomb counting ve shuntu).
-- **Enerkey** — aktivní balancer. **Dvě samostatné jednotky, každá pro jeden 16S string** ("Horní" a "Dolní" — potvrzuje topologii výše: 2× nezávislý 16S string, žádné křížové propojení balancerů mezi stringy).
+- **Enerkey** — aktivní balancer. **Dvě samostatné jednotky, každá pro jeden 16S string** ("Horní" a "Dolní" — potvrzuje topologii výše: 2× nezávislý 16S string, žádné křížové propojení balancerů mezi stringy). Jak mechanismus vyrovnávání skutečně funguje uvnitř (sekvenční přenos mezi aktuálně nejvyšším/nejnižším článkem, globální brána podle RunVol/StopVol) — viz samostatný dokument [enerkey-balancer-mechanism.md](enerkey-balancer-mechanism.md).
 
   **Klíčové zjištění (12.8.2026): obě jednotky měly vypnutý hlavní přepínač "Equalizing"** — bez ohledu na RunVol/StopVol/Max EquCur balancery **vůbec neběžely, nikdy**. Tohle je pravděpodobně skutečná hlavní příčina 270 mV rozjezdu, fundamentálnější než asymetrie nastavení popsaná níže — viz [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md#aktualizace-12822026-equalize-switch-byl-vypnutý--pravděpodobná-skutečná-hlavní-příčina).
 

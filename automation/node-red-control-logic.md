@@ -2,6 +2,8 @@
 
 Cíl: nahradit manuální/jednorázový postup z [rebalancing-procedure.md](../docs/rebalancing-procedure.md) trvalou closed-loop automatizací běžící přímo na Cerbu, řízenou podle **napětí článků**, ne podle SOC (viz [soc-calibration.md](../docs/soc-calibration.md) pro zdůvodnění).
 
+**Proč tahle externí kontrola nemá nahrazovat samotný Enerkey balancer, ale doplňovat ho**: podle [enerkey-balancer-mechanism.md](../docs/enerkey-balancer-mechanism.md) může Enerkey přestat pracovat pro celý string, pokud jeden článek leží mimo jeho RunVol–StopVol okno — externí kontrola nabíjecího proudu podle skutečného `MaxCellVoltage` napříč všemi články zůstává funkční nezávisle na tom, jestli interní balancer zrovna běží.
+
 **Status: návrh, zatím neimplementováno.**
 
 ## Co číst (Node-RED, D-Bus/MQTT z Venus OS)

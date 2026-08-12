@@ -20,6 +20,7 @@ Podrobný popis viz [`docs/system-overview.md`](docs/system-overview.md).
 Diagnostika DVCC shutdownu po pokusu o kalibraci SOC, nevybalancovaný pack, doporučený postup nápravy a návrh trvalé automatizace.
 
 - [`docs/system-overview.md`](docs/system-overview.md) — hardware a architektura systému, včetně ověřených nastavení Enerkey balancerů a doporučení k jejich sjednocení
+- [`docs/enerkey-balancer-mechanism.md`](docs/enerkey-balancer-mechanism.md) — jak Enerkey/NEEY balancer skutečně funguje uvnitř (sekvenční přenos energie, globální RunVol/StopVol brána) a proč to má důsledky pro naše nastavení
 - [`docs/incident-dvcc-shutdown.md`](docs/incident-dvcc-shutdown.md) — chronologie incidentu: SOC drift → pokus o kalibraci → pád Victronu do OFF
 - [`docs/soc-calibration.md`](docs/soc-calibration.md) — jak funguje SOC kalibrace u CAN-bus managed baterie, pojem tail current, proč nejde kalibrovat nevybalancovaný pack
 - [`docs/rebalancing-procedure.md`](docs/rebalancing-procedure.md) — doporučený postup bezpečného rebalance a kalibrace horní/dolní meze
