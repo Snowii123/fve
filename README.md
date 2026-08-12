@@ -29,9 +29,9 @@ Diagnostika DVCC shutdownu po pokusu o kalibraci SOC, nevybalancovaný pack, dop
 
 ### 2. Fronius / battery power mismatch — **odloženo, řeší se po dokončení kapitoly 1**
 
-Fronius 17,5 kW je předimenzovaný vůči ~400 Ah packu (bezpečně zvládá jen ~12,5 kW). Skokové PV výkonové špičky při rychlé změně ozáření mohou krátkodobě přestřelit nastavený nabíjecí limit (pozorováno 2 A nastaveno → ~30 A reálně) — pravděpodobně přímá souvislost s tím, proč byla historicky zavedená 96% cap automatizace (viz kapitola 1) a proč dobití na 100 % shazuje systém do OFF.
+Fronius (17,5 kW inverter, aktuálně osazeno 12,5 kWp panelů) je podle oficiální Victron sizing guidance předimenzovaný vůči ~400 Ah packu — pack má cca poloviční kapacitu, než Victron pro lithiové baterie doporučuje už jen pro současné osazení panelů. Skokové PV výkonové špičky při rychlé změně ozáření mohou krátkodobě přestřelit nastavený nabíjecí limit (pozorováno 2 A nastaveno → ~30 A reálně) — pravděpodobně přímá souvislost s tím, proč byla historicky zavedená 96% cap automatizace (viz kapitola 1) a proč dobití na 100 % shazuje systém do OFF. Obsahuje i nastřelený návrh řešení (buffer řízený napětím článků, ne SOC).
 
-- [`fronius/README.md`](fronius/README.md) — popis problému, souvislost s kapitolou 1, otevřené otázky a možná řešení (zatím nerozpracováno)
+- [`fronius/README.md`](fronius/README.md) — popis problému s podloženými čísly, souvislost s kapitolou 1, návrh řešení a otevřené otázky
 
 ## Stav
 

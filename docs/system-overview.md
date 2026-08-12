@@ -33,13 +33,21 @@
 
   **Významná asymetrie mezi jednotkami** — Horní aktivuje mnohem později (3,48 V vs. 3,35 V) a i po aktivaci vyrovnává 8× pomaleji (0,5 A vs. 4 A) než Dolní. To je potenciálně důležitý dílek k [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md): pokud incident vznikl na Horním stringu, dává to smysl — ten string má balancer nastavený tak, že má výrazně menší šanci stihnout vyrovnat rozjezd před tím, než článek narazí na OV, i nezávisle na historii se 96% capem.
 
+### Komunitně doporučené hodnoty (zdroje)
+
+Z veřejných diskuzí o NEEY/Enerkey aktivních balancerech pro LFP (stejná rodina firmwaru, stejná pojmenování polí):
+
+- **RunVol/EqualizationVol (aktivační napětí)**: komunitně doporučovaný rozsah **3,41–3,44 V**, s doporučením snížit, pokud 3,44 V nedává dobré vyrovnání ([DIY Solar Forum — Neey 4th Gen 4A Active Balancer Settings](https://diysolarforum.com/threads/neey-4th-gen-4a-active-balancer-settings.62013/)).
+- Konkrétní zdokumentovaný příklad nastavení: **RunVol 3,450 V / StopVol 3,440 V** ([DIY Solar Forum — How to calibrate NEEY/ENERKEY active balancer voltage?](https://diysolarforum.com/threads/how-to-calibrate-neey-enerkey-active-balancer-voltage.97277/)), jiný uživatel uvádí start 3,425 V / stop 3,400 V.
+- Stejné vlákno upozorňuje: pokud nabíjecí systém cílí cca 3,50 V/článek v absorpci u 16S packu, může být nutné zvednout **BMS high voltage disconnect na 3,60–3,65 V**, jinak BMS odřízne dřív, než nabíjení doběhne — relevantní přímo pro [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md) a pro ověření OV threshold v checklistu.
+
 ### Doporučené nastavení (sjednocené, ke zvážení)
 
 Cíl: obě jednotky se chovají stejně, žádná není systematicky slabší. Návrh — **stejné hodnoty na obou**:
 
 | Parametr | Doporučená hodnota | Zdůvodnění |
 |---|---|---|
-| RunVol (V) | **3,400** | Nižší než dosavadní Horní (3,480), takže začne pracovat s větší časovou rezervou před OV. Vyšší než dosavadní Dolní (3,350) by šlo taky, ale bezpečnější je vzít nižší z obou hodnot, ne průměr — čím dřív balancer nastoupí, tím víc času má. |
+| RunVol (V) | **3,400** | Mírně pod komunitním rozsahem 3,41–3,44 V (viz výše) — vědomě konzervativnější kvůli historii silně nevybalancovaného packu, dává víc času na vyrovnání. Každopádně nižší než dosavadní Horní (3,480). |
 | StopVol (V) | **3,300** | 100 mV hystereze pod RunVol — konzistentní okno pro obě jednotky. |
 | Startup DifVol (V) | **0,005** | Hodnota z Dolní jednotky — citlivější spuštění, zachytí menší rozjezd dřív než 0,010 V na Horní. |
 | Stop DifVol (V) | 0,000 | Needitovatelné na obou, není co měnit. |
