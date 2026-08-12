@@ -53,11 +53,15 @@ elif MaxCellVoltage >= V_warn - margin:
 
 Přes Node-RED (dbus-listener/dbus-out node nebo MQTT do Venus broker) zapisovat do DVCC nastavení max. nabíjecího proudu — přesná cesta (typicky pod `com.victronenergy.settings/Settings/SystemSetup/...` nebo ESS `CGwacs/...`) je nutné ověřit přes dbus-spy. Zapisovat **jen při změně stavu**, ne v každém cyklu.
 
-### Pozorovaný problém: nastavený limit se neprojevil
+### Pozorovaný problém: nastavený limit se neprojevuje spolehlivě
 
-V praxi bylo zjištěno, že nastavení 2 A v **GX Remote Console → Settings → DVCC** nemělo žádný efekt — reálně naměřený nabíjecí proud zůstal 5–6 A. Pravděpodobná příčina: v DVCC existuje samostatný přepínač **"Limit managed battery charge current"** (Ano/Ne) — pokud CAN-bus managed baterie (jako n-BMS) hlásí vlastní CCL, DVCC bez zapnutého přepínače **ignoruje ručně zadané číslo** a řídí se přímo hodnotou CCL od BMS, která bývá výrazně vyšší. Samotné vyplnění číselného pole bez zapnutí přepínače tedy nic neomezí.
+V praxi bylo zjištěno, že nastavení 2 A v **GX Remote Console → Settings → DVCC** (přepínač "Limit managed battery charge current" **potvrzeně zapnutý**, hodnota 2 A vyplněná) přesto neodpovídá reálně měřenému proudu — občas naskočí až na **~30 A**. Teorie s vypnutým přepínačem je tedy **vyvrácena**.
 
-➡️ Pro automatizaci to znamená: při zápisu limitu z Node-RED je nutné nastavit/ověřit i tenhle přepínač (jeho D-Bus cestu ověřit přes dbus-spy), ne jen zapisovat číselnou hodnotu — jinak bude zápis tiše neúčinný, přesně jako v tomto pozorovaném případě.
+**Nová vedoucí hypotéza**: zpoždění/nepřesnost regulace přebytku z AC-coupled Fronia. DVCC řídí přebytečný PV výkon z AC-coupled zdroje nepřímo — přes frequency-shift power control (posun frekvence sítě na výstupu Multiplusů, na což Fronius reaguje omezením výkonu). Tahle regulační smyčka má reálné zpoždění a setrvačnost — při rychlé změně PV výkonu (např. hrana mraku, prudké projasnění) může nabíjecí proud **krátkodobě přestřelit** nad nastavený limit, než se smyčka stihne dorovnat zpět. Rozdíl 2 A → 30 A (15×) je na první pohled hodně, ale u 17,5kW pole při skokové změně ozáření to není nereálné.
+
+**Jak to ověřit** (viz i [checklist](../diagnostics/checklist.md)): logovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem přes Node-RED. Pokud špičky na 30 A časově sedí se skokovými nárůsty PV výkonu, hypotéza se potvrzuje. Pokud špičky nastávají i za stabilního PV výkonu, je potřeba hledat jinou příčinu (např. souběh s jiným zdrojem nabíjení, nebo že DVCC limit reaguje jen na Multiplusy, ne na všechny cesty, kterými proud do packu teče).
+
+➡️ Pro automatizaci to znamená: i correctly zapsaný limit (číslo + zapnutý přepínač) nemusí být za všech okolností dodržen na 100 % přesně u AC-coupled PV zdroje — řídicí logika v [state machine výše](#řídicí-logika-state-machine) by měla počítat s tím, že `MaxChargeCurrent` je horní mez s určitou tolerancí/zpožděním, ne garance na ampér přesně. To zvyšuje důležitost sledování `MaxCellVoltage` jako nezávislé pojistky (viz sekce výše) — i kdyby proudový limit občas přestřelil, napěťová brzda musí zafungovat spolehlivě.
 
 ## Nasazení na Cerbu
 

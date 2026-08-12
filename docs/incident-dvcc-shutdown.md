@@ -22,9 +22,10 @@
 
 **Proč se pack takhle rozjel: Enerkey balancer pravděpodobně nikdy nepracoval.**
 
-- Enerkey (aktivní balancer) má nastavitelný aktivační práh napětí (**EqualizationVol**) — komunitně doporučovaná hodnota pro LFP je cca **3,41–3,44 V/článek**, přesná hodnota nastavená na tomto zařízení zatím není ověřená (viz [checklist](../diagnostics/checklist.md)).
-- Dokud automatizace držela pack pod 96 % SOC, pack se pravděpodobně **nikdy nedostal do napěťového okna**, kde balancer vůbec začíná pracovat.
+- Enerkey (aktivní balancer, samostatná jednotka pro každý ze 2 stringů — viz [system-overview.md](system-overview.md)) má ověřené aktivační napětí **3,480 V** na "Horním" stringu a **3,350 V** na "Dolním" stringu — výrazná asymetrie.
+- Dokud automatizace držela pack pod 96 % SOC, pack se pravděpodobně **nikdy nedostal do napěťového okna**, kde balancer vůbec začíná pracovat — obzvlášť na Horním stringu, kde je aktivační práh 3,48 V nastavený hodně blízko vrcholu nabíjecí křivky.
 - Výsledek: **6 měsíců balancer prakticky nedělal nic** a rozjezd 270 mV se tiše nabaloval, aniž by to bylo někde vidět (SOC ukazoval zdánlivě rozumná čísla).
+- **Doplňující hypotéza**: i po skončení 96% capu má Horní string balancer nastavený s max. vyrovnávacím proudem jen **0,5 A** (8× méně než Dolní s 4 A) a aktivuje se později — takže i kdyby pracoval, vyrovnává rozjezd mnohem pomaleji. Pokud incident vznikl na Horním stringu, je tohle pravděpodobně dodatečný přispívající faktor, ne jen historie s 96% capem.
 
 ## Návaznost na jev "vybíjení jen do 47 %"
 
