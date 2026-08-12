@@ -53,15 +53,53 @@ Uživatelský návrh: nechat v battery packu trvalý buffer/rezervu, kterou prav
 - Musí to být **MaxCellVoltage napříč oběma stringy** (32 článků), ne průměr ani napětí packu — jinak se opakuje přesně ta chyba, co způsobila původní incident (jeden vychýlený článek se schová v průměru).
 - **Rychlost reakce**: vzhledem ke strukturálnímu mismatchu výše (panely fyzicky můžou poslat víc výkonu, než pack snese, i bez závady) nemusí být softwarová smyčka (Node-RED v cyklu 30-60 s, nebo i DVCC frequency-shift) dost rychlá na nejrychlejší přechody (hrana mraku může proběhnout v řádu sekund). Buffer proto musí mít **fyzickou rezervu dostatečnou i bez spoléhání na to, že software zareaguje včas** — ne jen "reaktivní brzdu", ale statickou mez s marží. Tuhle marži je potřeba nastavit podle reálně naměřeného chování špičky (viz diagnostika níže), ne odhadem.
 
+### Důležitý invariant: balancer musí pracovat i při běžném provozu, ne jen při kalibraci
+
+Pokud by aktivační práh balanceru (`RunVol`) ležel **nad** `V_buffer_ceiling`, pack by ho při běžném denním provozu nikdy nedosáhl — balancer by dřímal celé týdny/měsíce mezi kalibracemi, přesně jako se to stalo pod starým 96% SOC capem (viz [incident-dvcc-shutdown.md](../docs/incident-dvcc-shutdown.md)). To by byla stejná chyba, jen s napětím místo SOC. Invariant tedy zní:
+
+```
+RunVol (balancer aktivní)  <  V_buffer_ceiling (denní strop)  <  V_warn (n-BMS měkké varování)  <  V_hard (n-BMS tvrdý OV disconnect)
+```
+
+`RunVol` musí ležet s reálnou marží pod `V_buffer_ceiling` (ne těsně pod ním), aby pack při běžném dobíjení trávil v pracovním okně balanceru smysluplný čas každý den — ne jen pár vteřin těsně před stropem.
+
+### Prozatímní čísla (pracovní odhad — NEZAVÁDĚT bez ověření `V_hard`)
+
+| Práh | Prozatímní hodnota | Status |
+|---|---|---|
+| `V_hard` (n-BMS tvrdý OV disconnect) | ~3,55–3,65 V (odhad) | **Neověřeno** — odvozeno z ekosystémové normy u podobných BMS (viz komunitní poznámka v [system-overview.md](../docs/system-overview.md#komunitně-doporučené-hodnoty-zdroje)), ne z dat tohoto konkrétního n-BMS. Nutno zjistit přímo. |
+| `V_buffer_ceiling` | **3,450 V** | Odhad ~100–200 mV pod `V_hard` — **bez zahrnuté marže na IR-drop výchylku ze špičky**, ta se teprve musí naměřit (viz níže). Číslo se pravděpodobně bude muset posunout níž. |
+| `RunVol` (obě Enerkey jednotky) | **3,400 V** | 50 mV pod `V_buffer_ceiling` — dost na smysluplný denní dwell time v pracovním okně balanceru. |
+| `StopVol` | **3,300 V** | 100 mV hystereze pod `RunVol`. |
+
+`V_hard` je jediné číslo v žebříčku, kde bych netoleroval "zkusíme a uvidíme" — pokud je ve skutečnosti nižší než odhad, celý žebříček se musí posunout dolů dřív, než se cokoliv z tohohle nasadí ostro.
+
 ### Konkrétní návrh implementace
 
-1. **Definovat `V_buffer_ceiling`** (per-cell, na obou stringech) — trvalý provozní strop na `MaxCellVoltage`, nastavený s marží pod OV warning threshold v n-BMS (zatím neznámý, viz [checklist](../diagnostics/checklist.md)). Marže musí pokrýt reálně naměřenou napěťovou výchylku během špičky (bod 2 níže), ne jen odhad.
-2. **Diagnostika před nastavením konkrétního čísla**: zachytit přes Node-RED/dbus-spy `MaxCellVoltage` v okamžiku, kdy nastane proudová špička (2 A → ~30 A) — kolik mV skutečně vyskočí a jak rychle se vrátí zpět. Bez týhle naměřené hodnoty je `V_buffer_ceiling` jen odhad.
+1. **Definovat `V_buffer_ceiling`** (per-cell, na obou stringech) podle žebříčku výše — trvalý provozní strop na `MaxCellVoltage`. Marže pod `V_hard` musí pokrýt reálně naměřenou napěťovou výchylku během špičky (bod 2 níže), ne jen odhad.
+2. **Diagnostika před nastavením konkrétního čísla** — viz podrobná metodika a alternativy k Node-RED níže.
 3. **Znovupoužít architekturu z [automation/node-red-control-logic.md](../automation/node-red-control-logic.md)** — stejný princip (brzdění podle `MaxCellVoltage`) navržený pro rebalanci lze rozšířit na trvalý provozní režim: jakmile se `MaxCellVoltage` přiblíží `V_buffer_ceiling`, omezit/pozastavit nabíjení bez ohledu na SOC. Rozdíl oproti rebalanční fázi: tohle běží **trvale**, ne jen během řízené kalibrace, takže potřebuje být odladěné na běžný provoz, ne jen na pomalé řízené nabíjení.
 4. **Zvážit lokální reakci přímo v n-BMS** (pokud to podporuje) — smyčka Node-RED → DVCC → Fronius má nevyhnutelně dopravní zpoždění (round-trip přes GX). Pokud n-BMS umí měkké průběžné omezování proudu (ne jen binární CCL=0 při dosažení hard limitu), reaguje lokálně rychleji než cokoliv přes síť. Ověřit jako součást stejné položky v checklistu o OV warning threshold.
-5. **Periodická kalibrace zůstává** — přesně jak navrhujete: buffer omezuje běžný denní provoz, ale pravidelně (podle uvážení, např. jednou za pár týdnů/měsíců) se buffer záměrně uvolní a provede se řízený plný cyklus podle [rebalancing-procedure.md](../docs/rebalancing-procedure.md), aby se udržela kalibrace a balancer měl šanci dotáhnout zbytkovou nerovnováhu na obou stringech. Mimo tyhle kalibrační okna zůstává SOC čistě informativní, nikdy není řídicí veličinou — ani pro rebalanci, ani teď pro buffer.
+5. **Periodická kalibrace zůstává** — buffer omezuje běžný denní provoz, ale pravidelně (podle uvážení, např. jednou za pár týdnů/měsíců) se buffer záměrně uvolní a provede se řízený plný cyklus podle [rebalancing-procedure.md](../docs/rebalancing-procedure.md) (přes síť, extrémně nízký nabíjecí proud), aby se udržela kalibrace a balancer měl šanci dotáhnout zbytkovou nerovnováhu na obou stringech. Mimo tyhle kalibrační okna zůstává SOC čistě informativní, nikdy není řídicí veličinou — ani pro rebalanci, ani teď pro buffer.
 
 **Kompromis, se kterým je potřeba počítat**: konzervativně nastavený `V_buffer_ceiling` znamená trvale nevyužitou část kapacity packu (bezpečnost na úkor kapacity každý den). Vzhledem ke strukturálnímu mismatchu výše je to pravděpodobně správný kompromis, dokud se neřeší mismatch samotný (větší pack, nebo tvrdší omezení PV strany).
+
+### Metodika měření napěťové výchylky při špičce
+
+**Co logovat**: `System/MaxCellVoltage`, `System/MinCellVoltage`, `System/MaxVoltageCellId` (který string/článek), okamžitý nabíjecí proud do packu, výkon Fronia — všechno se stejným časovým razítkem.
+
+**Vzorkovací frekvence**: **1–2 s**, výrazně rychlejší než 30-60s cyklus navržený pro řídicí smyčku (ta je na rozhodování, ne na zachycení špičky) — hrana mraku může proběhnout v řádu jednotek sekund.
+
+**Postup**: souvislé logování po dobu jednoho odpoledne s proměnlivým počasím, pak zpětně v datech najít momenty, kdy proud vyskočil výrazně nad nastavených 2 A. U každého takového momentu odečíst: `MaxCellVoltage` těsně před špičkou, na vrcholu špičky, a jak rychle se vrátilo zpátky. Rozdíl (před vs. vrchol) je přesně ta IR-drop marže, kterou je potřeba přičíst k `V_buffer_ceiling`. Opakovat na víc než jedné špičce a vzít jako podklad **nejhorší pozorovanou** výchylku, ne průměr.
+
+**Alternativy k budování Node-RED logu** (od nejmíň k nejvíc pracnému):
+
+1. **VRM Portal historická data** — pokud VRM loguje `MaxCellVoltage` (u managed baterií to často loguje spolu s battery widgetem) a určitě loguje výkon Fronia, odpověď možná už leží v datech, která existují. Zkontrolovat historii na den s proměnlivým počasím a hledat korelaci — nulová práce navíc.
+2. **Enerkey appka a n-BMS vlastní logy** — appka má záložky STATUS a ALARM (viz screenshoty v [system-overview.md](../docs/system-overview.md)); stojí za to zkontrolovat, jestli STATUS nemá historii/graf a jestli n-BMS nemá vlastní log kolem protection eventů — kryje se s otevřenou položkou "CCL/DCL log v okamžiku pádu do OFF" v [checklistu](../diagnostics/checklist.md).
+3. **Jednorázový SSH skript na Cerbu** — `dbus-monitor` nebo krátký Python skript přes velib_python, spuštěný na pár hodin během proměnlivého počasí, zapisující do souboru. Míň práce než trvalý Node-RED flow, protože je to zahoditelné/jednorázové.
+4. **Node-RED flow** — nejvíc práce, ale ne zbytečná investice: tahle monitorovací logika se stejně bude muset postavit pro trvalou řídicí smyčku ([node-red-control-logic.md](../automation/node-red-control-logic.md)), takže pokud první tři možnosti nedají dost dat, nic se nezahazuje.
+
+Doporučeno začít bodem 1 (zdarma, možná už tam odpověď je) a postupovat dál jen podle potřeby.
 
 ## Proč se řeší odděleně od kalibrace baterie
 
@@ -74,8 +112,9 @@ Uživatelský návrh: nechat v battery packu trvalý buffer/rezervu, kterou prav
 
 ## Otevřené otázky / k ověření
 
-- [ ] Zachytit `MaxCellVoltage` (obou stringů) v okamžiku reálné proudové špičky (2 A → ~30 A) — jak vysoko vyskočí a jak rychle relaxuje. Klíčové pro nastavení `V_buffer_ceiling`.
-- [ ] Logovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem — potvrdit, že špičky časově korelují se skokovými změnami PV výkonu.
+- [ ] Ověřit `V_hard` (tvrdý OV disconnect) přímo v n-BMS — nejdůležitější neznámá v celém žebříčku prahů výše.
+- [ ] Zjistit skutečnou IR-drop výchylku `MaxCellVoltage` (obou stringů) při reálné proudové špičce (2 A → ~30 A) — metodika a pořadí kroků viz výše. Klíčové pro doladění `V_buffer_ceiling`.
+- [ ] Logovat/zkontrolovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem — potvrdit, že špičky časově korelují se skokovými změnami PV výkonu.
 - [ ] Zkontrolovat ESS nastavení, jestli neobsahuje analogii k "Allow DC MPPT to export" pro AC-coupled zdroj (feed-in excess / maximize export).
 - [ ] Ověřit, jestli n-BMS podporuje měkké průběžné omezování proudu (rychlejší lokální reakce) místo jen binárního CCL cutoff.
 - [ ] Pokud je známý přesný model použitých LFP článků, dohledat jejich vlastní doporučenou C-rate a zpřesnit odhad ~10-12 kW výše.

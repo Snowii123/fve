@@ -47,7 +47,7 @@ Cíl: obě jednotky se chovají stejně, žádná není systematicky slabší. N
 
 | Parametr | Doporučená hodnota | Zdůvodnění |
 |---|---|---|
-| RunVol (V) | **3,400** | Mírně pod komunitním rozsahem 3,41–3,44 V (viz výše) — vědomě konzervativnější kvůli historii silně nevybalancovaného packu, dává víc času na vyrovnání. Každopádně nižší než dosavadní Horní (3,480). |
+| RunVol (V) | **3,400** | Mírně pod komunitním rozsahem 3,41–3,44 V (viz výše). **Důležitější důvod než komunitní hodnota**: musí ležet s marží pod `V_buffer_ceiling` (nový denní strop nabíjení, nástupce 96% SOC capu) — jinak balancer nikdy nedostane šanci pracovat při běžném provozu, jen při vzácné kalibraci na 100 %, což byla přesně příčina původního incidentu. Odvozeno ze žebříčku prahů v [fronius/README.md](../fronius/README.md#prozatímní-čísla-pracovní-odhad--nezavádět-bez-ověření-v_hard) — **prozatímní číslo, čeká na doladění podle naměřeného `V_buffer_ceiling`**. |
 | StopVol (V) | **3,300** | 100 mV hystereze pod RunVol — konzistentní okno pro obě jednotky. |
 | Startup DifVol (V) | **0,005** | Hodnota z Dolní jednotky — citlivější spuštění, zachytí menší rozjezd dřív než 0,010 V na Horní. |
 | Stop DifVol (V) | 0,000 | Needitovatelné na obou, není co měnit. |
