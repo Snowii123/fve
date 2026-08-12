@@ -29,4 +29,6 @@ Sledovat trend v čase — klesající spread = balancer/pomalé nabíjení fung
 | SOC ~99 %, max. nabíjecí proud omezen na 2 A (12.8.2026) | ~64 mV |
 | SOC 100 % (VRM), balancer ještě vypnutý, obě extrémy v jednom stringu (12.8.2026) | ~82 mV |
 | Po zapnutí Equalize na obou jednotkách, pack se vybíjí (12.8.2026, 19:25) — Horní `EquRun` 4,011 A / DifVol 31 mV, Dolní `System ready` 0 A / DifVol 18 mV, napříč oběma stringy max 3,364 V / min 3,331 V | **~33 mV** |
+| Pod zátěží, vybíjení 22 A (12.8.2026) — konkrétní článek neidentifikován | ~200 mV (pod zátěží, IR efekt — viz řádek níže) |
+| **V klidu** (no load), 53,3 V pack, Pack 1 nejnižší 3,219 V / Pack 2 nejvyšší 3,231 V (12.8.2026) | **~12 mV** — potvrzuje, že 200 mV pod zátěží byl hlavně IR efekt, ne reálná nerovnováha náboje |
 
