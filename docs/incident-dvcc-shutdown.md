@@ -27,6 +27,17 @@
 - Výsledek: **6 měsíců balancer prakticky nedělal nic** a rozjezd 270 mV se tiše nabaloval, aniž by to bylo někde vidět (SOC ukazoval zdánlivě rozumná čísla).
 - **Doplňující hypotéza**: i po skončení 96% capu má Horní string balancer nastavený s max. vyrovnávacím proudem jen **0,5 A** (8× méně než Dolní s 4 A) a aktivuje se později — takže i kdyby pracoval, vyrovnává rozjezd mnohem pomaleji. Pokud incident vznikl na Horním stringu, je tohle pravděpodobně dodatečný přispívající faktor, ne jen historie s 96% capem.
 
+## Aktualizace (12.8.2026): Equalize switch byl vypnutý — pravděpodobná skutečná hlavní příčina
+
+Při kontrole appky se zjistilo, že **Equalize switch nebyl zapnutý na žádné z jednotek**. Bez ohledu na nastavené RunVol/StopVol/Max EquCur balancery **vůbec neběžely, po celou dobu**. To je fundamentálnější vysvětlení 270 mV rozjezdu než asymetrie nastavení popsaná výše (ta zůstává platná jako reálné zjištění, ale byla irelevantní, dokud byl hlavní přepínač vypnutý — ani jedna jednotka nikdy neběžela).
+
+**Sled událostí při nápravě:**
+
+1. Systém byl v mezičase v ESS režimu **"Keep batteries charged"** (limit 2 A), SOC ukazoval 100 %. Nabíjecí proud i s Froniem fyzicky odpojeným na jističi kolísal 3–4,5 A, občas až 19 A — potvrzuje, že problém s nedodržováním limitu **není specifický jen pro AC-coupled PV** (viz aktualizovaná hypotéza ve [fronius/README.md](../fronius/README.md)).
+2. Po prvním zapnutí Equalize switche došlo **znovu k pádu Victronu do OFF**. Pravděpodobně shoda okolností — pack na SOC 100 %, nikdy nevyrovnávaný, pokračující nabíjení přes "Keep batteries charged" ho pravděpodobně dotlačilo přes hranici — ne přímý důsledek balanceru samotného. Nebylo kontrolovaně odlišeno (test "balancer bez nabíjení" se neprováděl).
+3. Náprava: ESS přepnuto na **Optimized without BatteryLife** → pack se začal vybíjet (bezpečný směr, pryč od hrany). Obě jednotky sjednoceny na **RunVol 3,350 V / StopVol 3,180 V / Startup DifVol 0,005 V / Max EquCur 4,0 A** (hodnoty převzaté z původní Dolní jednotky). Equalize znovu zapnuto na obou, tentokrát při klesajícím napětí.
+4. Výsledek — pack-wide spread rychle klesá: **270 mV** (incident) → **82 mV** (SOC 100 %, obě extrémy v jednom stringu, balancer ještě vypnutý) → **~33 mV** (aktuální stav, oba balancery aktivní — Horní DifVol 31 mV ve stavu `EquRun` s 4,011 A, Dolní DifVol 18 mV). Viz tabulka měření v [checklistu](../diagnostics/checklist.md).
+
 ## Návaznost na jev "vybíjení jen do 47 %"
 
 Pokud "sync na 100 %" proběhl v okamžiku, kdy jeden článek už byl na hraně OV a zbytek packu ne, je tenhle sync nepřesný — SOC pak neodpovídá realitě **oběma směry**, nejen nahoru. 47 % je pravděpodobně bod, kde **nejslabší (nejnižší) článek** narazil na svůj discharge cutoff v n-BMS, zatímco zbytek packu měl ještě rezervu — SOC ale reportuje odhad za celý pack, ne stav nejhoršího článku.

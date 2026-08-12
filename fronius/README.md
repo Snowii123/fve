@@ -39,6 +39,12 @@ Dohledané [komunitní vlákno](https://communityarchive.victronenergy.com/quest
 
 U nás je Fronius **AC-coupled**, ne DC MPPT, takže tahle konkrétní výjimka pravděpodobně přímo neplatí — ale stojí za to **zkontrolovat ESS nastavení, jestli tam není analogická volba** (něco jako "feed-in excess"/"maximize export"), která by mohla mít podobný efekt i pro AC-coupled zdroj. V každém případě to potvrzuje obecný vzorec: DVCC limity mají u Victronu víc výjimek/edge-casů, než by se čekalo — v kombinaci se strukturálním mismatchem výše je fronta příčin pravděpodobně: (1) pack je objektivně poddimenzovaný, (2) frequency-shift regulační smyčka má setrvačnost, (3) možná ještě nějaká ESS volba prioritizující export nad limitem.
 
+### Oprava (12.8.2026): problém nastává i bez Fronia
+
+Pozorováno přímo na systému: **Fronius byl fyzicky odpojený na jističi** (žádný AC-coupled PV výkon nemohl do systému téct), nastavený limit byl 2 A, a přesto proud při nabíjení (ze sítě, přes ESS mód "Keep batteries charged") kolísal 3–4,5 A, občas až 19 A. Tohle **vyvrací frequency-shift/AC-coupled curtailment jako jedinou příčinu** — problém s nedodržováním limitu existuje i u čistě síťového nabíjení přes Multiplusy samotné, bez jakékoliv účasti Fronia.
+
+➡️ Prioritní podezřelý se posouvá na **vlastní regulační smyčku nabíječů v Multiplusech**, nebo na chování ESS módu "Keep batteries charged" specificky (možná používá jiný řídicí mechanismus/cestu než běžný ESS provoz). Nejde tedy čistě o "Fronius" problém, i když se jmenuje kapitola takhle — jde o obecnější nedodržování DVCC/nabíjecího limitu, kde AC-coupled PV byl jeden z projevů, ne jediná příčina.
+
 ## Návrh řešení: buffer řízený napětím článků, ne SOC
 
 Uživatelský návrh: nechat v battery packu trvalý buffer/rezervu, kterou pravidelně (příležitostně) rekalibrujeme, a **řídit velikost bufferu podle napětí článků, ne podle SOC** (jak se to dělalo dosud přes 96% cap).
@@ -114,8 +120,9 @@ Doporučeno začít bodem 1 (zdarma, možná už tam odpověď je) a postupovat 
 
 - [ ] Ověřit `V_hard` (tvrdý OV disconnect) přímo v n-BMS — nejdůležitější neznámá v celém žebříčku prahů výše.
 - [ ] Zjistit skutečnou IR-drop výchylku `MaxCellVoltage` (obou stringů) při reálné proudové špičce (2 A → ~30 A) — metodika a pořadí kroků viz výše. Klíčové pro doladění `V_buffer_ceiling`.
-- [ ] Logovat/zkontrolovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem — potvrdit, že špičky časově korelují se skokovými změnami PV výkonu.
+- [x] Logovat/zkontrolovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem — potvrdit, že špičky časově korelují se skokovými změnami PV výkonu. **Vyvráceno**: špičky (3–4,5 A, občas 19 A i přes limit 2 A) nastaly i s Froniem fyzicky odpojeným na jističi. Viz oprava výše.
 - [ ] Zkontrolovat ESS nastavení, jestli neobsahuje analogii k "Allow DC MPPT to export" pro AC-coupled zdroj (feed-in excess / maximize export).
+- [ ] **Nová položka**: ověřit, jestli ESS mód "Keep batteries charged" používá jiný řídicí mechanismus pro nabíjecí proud než běžný ESS provoz — pozorováno jako aktivní právě v okamžiku špiček 12.8.2026.
 - [ ] Ověřit, jestli n-BMS podporuje měkké průběžné omezování proudu (rychlejší lokální reakce) místo jen binárního CCL cutoff.
 - [ ] Pokud je známý přesný model použitých LFP článků, dohledat jejich vlastní doporučenou C-rate a zpřesnit odhad ~10-12 kW výše.
 - [ ] Dlouhodobě zvážit rozšíření battery packu jako strukturální řešení mismatche (mimo scope softwarové opravy).

@@ -16,22 +16,34 @@
 ## BMS a balancing
 
 - **n-BMS** — komunikuje po CAN-bus přímo do Venus OS jako *managed battery* (Victron battery service). SOC, CCL (charge current limit) a DCL (discharge current limit) hlásí BMS, Victron/DVCC je jen konzumuje a řídí se jimi — SOC tedy **nepočítá Victron sám** (na rozdíl od systémů se SmartShunt/BMV, kde SOC počítá coulomb counting ve shuntu).
-- **Enerkey** — aktivní balancer. **Dvě samostatné jednotky, každá pro jeden 16S string** ("Horní" a "Dolní" — potvrzuje topologii výše: 2× nezávislý 16S string, žádné křížové propojení balancerů mezi stringy). Ověřená skutečná nastavení (appka, Bluetooth, heslo `123456`):
+- **Enerkey** — aktivní balancer. **Dvě samostatné jednotky, každá pro jeden 16S string** ("Horní" a "Dolní" — potvrzuje topologii výše: 2× nezávislý 16S string, žádné křížové propojení balancerů mezi stringy).
+
+  **Klíčové zjištění (12.8.2026): obě jednotky měly vypnutý hlavní přepínač "Equalizing"** — bez ohledu na RunVol/StopVol/Max EquCur balancery **vůbec neběžely, nikdy**. Tohle je pravděpodobně skutečná hlavní příčina 270 mV rozjezdu, fundamentálnější než asymetrie nastavení popsaná níže — viz [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md#aktualizace-12822026-equalize-switch-byl-vypnutý--pravděpodobná-skutečná-hlavní-příčina).
+
+  **Stav před nápravou** (nastavení beze změny, ale switch OFF na obou):
 
   | Parametr | Horní | Dolní |
   |---|---|---|
   | Qty(S) | 16 | 16 |
-  | RunVol (V) — aktivační napětí | **3,480** | **3,350** |
+  | RunVol (V) — aktivační napětí | 3,480 | 3,350 |
   | StopVol (V) — vypínací napětí | 3,400 | 3,180 |
   | Startup DifVol (V) — min. rozdíl pro start | 0,010 | 0,005 |
-  | Stop DifVol (V) | 0,000 (needitovatelné) | 0,000 (needitovatelné) |
-  | Max EquCur (A) — max. vyrovnávací proud | **0,5** | **4,0** |
+  | Max EquCur (A) — max. vyrovnávací proud | 0,5 | 4,0 |
   | Soc (Ah) | 200 | 200 |
-  | BatType | LFP | LFP |
 
-  Soc(Ah)=200 na obou jednotkách odpovídá ~200 Ah na string, dohromady ~400 Ah — konzistentní s odhadem celkové kapacity packu výše.
+  Soc(Ah)=200 na obou jednotkách odpovídá ~200 Ah na string, dohromady ~400 Ah — konzistentní s odhadem celkové kapacity packu výše. Asymetrie nastavení (Horní 8× pomalejší, aktivuje později) zůstává platné zjištění — jen bylo irelevantní, dokud byl přepínač vypnutý.
 
-  **Významná asymetrie mezi jednotkami** — Horní aktivuje mnohem později (3,48 V vs. 3,35 V) a i po aktivaci vyrovnává 8× pomaleji (0,5 A vs. 4 A) než Dolní. To je potenciálně důležitý dílek k [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md): pokud incident vznikl na Horním stringu, dává to smysl — ten string má balancer nastavený tak, že má výrazně menší šanci stihnout vyrovnat rozjezd před tím, než článek narazí na OV, i nezávisle na historii se 96% capem.
+  **Aktuální stav — aplikováno (12.8.2026)**: obě jednotky sjednoceny na hodnoty z původní Dolní jednotky, Equalize **zapnuto na obou**:
+
+  | Parametr | Horní i Dolní (sjednoceno) |
+  |---|---|
+  | RunVol (V) | **3,350** |
+  | StopVol (V) | **3,180** |
+  | Startup DifVol (V) | **0,005** |
+  | Max EquCur (A) | **4,0** |
+  | Equalizing | **ON (obě jednotky)** |
+
+  Živé odečty krátce po zapnutí: Horní `State: EquRun`, `EquCur 4,011 A`, `DifVol 0,031 V` (31 mV); Dolní `State: System ready`, `EquCur 0,000 A` (pravděpodobně jen duty-cycling mezi dávkami, ne porucha — DifVol 0,018 V je už malé), `DifVol 0,018 V` (18 mV). Napříč oběma stringy: max 3,364 V / min 3,331 V → **pack-wide spread ~33 mV**, prudký pokles z historických 270 mV. Viz trend v [checklist.md](../diagnostics/checklist.md).
 
 ### Komunitně doporučené hodnoty (zdroje)
 
@@ -41,21 +53,14 @@ Z veřejných diskuzí o NEEY/Enerkey aktivních balancerech pro LFP (stejná ro
 - Konkrétní zdokumentovaný příklad nastavení: **RunVol 3,450 V / StopVol 3,440 V** ([DIY Solar Forum — How to calibrate NEEY/ENERKEY active balancer voltage?](https://diysolarforum.com/threads/how-to-calibrate-neey-enerkey-active-balancer-voltage.97277/)), jiný uživatel uvádí start 3,425 V / stop 3,400 V.
 - Stejné vlákno upozorňuje: pokud nabíjecí systém cílí cca 3,50 V/článek v absorpci u 16S packu, může být nutné zvednout **BMS high voltage disconnect na 3,60–3,65 V**, jinak BMS odřízne dřív, než nabíjení doběhne — relevantní přímo pro [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md) a pro ověření OV threshold v checklistu.
 
-### Doporučené nastavení (sjednocené, ke zvážení)
+### Doporučené nastavení — status: aplikováno (s drobnou odchylkou)
 
-Cíl: obě jednotky se chovají stejně, žádná není systematicky slabší. Návrh — **stejné hodnoty na obou**:
+Původní návrh byl RunVol 3,400 V / StopVol 3,300 V. Uživatel místo toho sjednotil obě jednotky na hodnoty **z původní Dolní jednotky** (RunVol 3,350 V / StopVol 3,180 V) — viz tabulka "Aktuální stav" výše. To je v pořádku, dokonce lepší vůči invariantu z [fronius/README.md](../fronius/README.md#důležitý-invariant-balancer-musí-pracovat-i-při-běžném-provozu-ne-jen-při-kalibraci) (`RunVol < V_buffer_ceiling`) — nižší RunVol znamená ještě víc rezervy.
 
-| Parametr | Doporučená hodnota | Zdůvodnění |
-|---|---|---|
-| RunVol (V) | **3,400** | Mírně pod komunitním rozsahem 3,41–3,44 V (viz výše). **Důležitější důvod než komunitní hodnota**: musí ležet s marží pod `V_buffer_ceiling` (nový denní strop nabíjení, nástupce 96% SOC capu) — jinak balancer nikdy nedostane šanci pracovat při běžném provozu, jen při vzácné kalibraci na 100 %, což byla přesně příčina původního incidentu. Odvozeno ze žebříčku prahů v [fronius/README.md](../fronius/README.md#prozatímní-čísla-pracovní-odhad--nezavádět-bez-ověření-v_hard) — **prozatímní číslo, čeká na doladění podle naměřeného `V_buffer_ceiling`**. |
-| StopVol (V) | **3,300** | 100 mV hystereze pod RunVol — konzistentní okno pro obě jednotky. |
-| Startup DifVol (V) | **0,005** | Hodnota z Dolní jednotky — citlivější spuštění, zachytí menší rozjezd dřív než 0,010 V na Horní. |
-| Stop DifVol (V) | 0,000 | Needitovatelné na obou, není co měnit. |
-| Max EquCur (A) | **4,0** | Zrychlí Horní jednotku 8×. **Než to nastavíte, ověřte, že je Horní hardwarově na 4 A skutečně dimenzovaná** — pokud je to jiná/slabší revize jednotky, nechte ji na jejím bezpečném maximu místo kopírování čísla od Dolní. |
-
-⚠️ Tohle je odvozené doporučení, ne ověřená bezpečná hodnota — **než se to aplikuje, ideálně potvrdit OV warning threshold v n-BMS** (viz [checklist](../diagnostics/checklist.md)) a mít jistotu, že 3,400 V start má dostatečnou rezervu pod ním. Po aplikaci sledovat chování stejně jako v [rebalancing-procedure.md](rebalancing-procedure.md).
+⚠️ Pořád platí: **`V_hard` (tvrdý OV disconnect v n-BMS) není ověřený** — viz [checklist](../diagnostics/checklist.md). Číslo 3,350 V je bezpečně nízko oproti odhadovanému rozsahu, ale odhad zůstává odhadem, dokud se nezjistí přímo z n-BMS.
 
 ## Řízení / automatizace
 
 - Node-RED běžící (dříve) s vlastní logikou omezující nabíjení — viz [incident-dvcc-shutdown.md](incident-dvcc-shutdown.md) pro historii a důvod, proč byla tato konkrétní automatizace problematická.
 - ESS **Minimum SOC = 20 %** (potvrzeno uživatelem, vyloučeno jako příčina jevu popsaného v incidentu — viz tamtéž).
+- ESS mód **"Keep batteries charged"** — pozorováno aktivní během incidentu 12.8.2026, aktivně tlačí pack k udržování 100 % SOC. Jde přímo proti plánované strategii "buffer pod stropem" ([fronius/README.md](../fronius/README.md)) — měl by se používat jen záměrně během řízených kalibračních cyklů, ne jako trvalý stav. Po incidentu přepnuto na **Optimized without BatteryLife**.
