@@ -53,6 +53,12 @@ elif MaxCellVoltage >= V_warn - margin:
 
 Přes Node-RED (dbus-listener/dbus-out node nebo MQTT do Venus broker) zapisovat do DVCC nastavení max. nabíjecího proudu — přesná cesta (typicky pod `com.victronenergy.settings/Settings/SystemSetup/...` nebo ESS `CGwacs/...`) je nutné ověřit přes dbus-spy. Zapisovat **jen při změně stavu**, ne v každém cyklu.
 
+### Pozorovaný problém: nastavený limit se neprojevil
+
+V praxi bylo zjištěno, že nastavení 2 A v **GX Remote Console → Settings → DVCC** nemělo žádný efekt — reálně naměřený nabíjecí proud zůstal 5–6 A. Pravděpodobná příčina: v DVCC existuje samostatný přepínač **"Limit managed battery charge current"** (Ano/Ne) — pokud CAN-bus managed baterie (jako n-BMS) hlásí vlastní CCL, DVCC bez zapnutého přepínače **ignoruje ručně zadané číslo** a řídí se přímo hodnotou CCL od BMS, která bývá výrazně vyšší. Samotné vyplnění číselného pole bez zapnutí přepínače tedy nic neomezí.
+
+➡️ Pro automatizaci to znamená: při zápisu limitu z Node-RED je nutné nastavit/ověřit i tenhle přepínač (jeho D-Bus cestu ověřit přes dbus-spy), ne jen zapisovat číselnou hodnotu — jinak bude zápis tiše neúčinný, přesně jako v tomto pozorovaném případě.
+
 ## Nasazení na Cerbu
 
 - Node-RED addon zapnutý ve Venus OS (Large image) — běží jako služba přímo na Cerbu 24/7.

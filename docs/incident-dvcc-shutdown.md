@@ -3,12 +3,13 @@
 ## Chronologie
 
 1. **Dlouhodobý stav před incidentem** — Node-RED automatizace bránila nabití baterie nad **96 % SOC**, jako ochrana podkapacitního packu. Automatizace běžela v tomto režimu cca **půl roku**.
-2. **Důsledek** — SOC kalibrace za tu dobu zdriftovala: baterie ukazovala **77 %**, ale reálně už nešla dál dobít (skutečný stav packu neodpovídal zobrazenému SOC).
+2. **Důsledek** — SOC kalibrace za tu dobu zdriftovala: baterie ukazovala **77 %**, ale reálně už nešla dál **vybít** (skutečný stav packu neodpovídal zobrazenému SOC — reálná využitelná kapacita byla nižší, než 77 % naznačovalo).
 3. Uživatel automatizaci **vypnul** a nechal baterii ručně dobít na **100 %**.
 4. Baterie při tom **chvíli přestala brát proud**; po chvíli se nabíjení znovu rozjelo.
 5. Celý Victron systém (Multiplusy) se **sám přehodil z režimu On do Off**. Ve VRM/alertech nebylo vidět nic, co by to přímo vysvětlovalo.
 6. Nová informace zjištěná následně — při provozu čistě na baterii (bez dobíjení) se pack vybije **jen do 47 % SOC**, než systém začne brát proud ze sítě.
    - ESS **Minimum SOC = 20 %** — ověřeno uživatelem, **vyloučeno jako příčina** (nevysvětluje odpojení už při 47 %).
+   - **Aktuální hypotéza (neověřeno, plánuje se retest):** jev je nejspíš způsobený samostatnou **noční nabíjecí automatizací**, která baterii pravidelně dobíjí zpět na 50 % — tedy pack v praxi nikdy nedostane šanci klesnout níž, protože ho automatizace v noci "podchytí" dřív, ne že by 47 % byl skutečný fyzický limit. Až se tahle automatizace vypne/upraví, plánuje se znovu zkusit, jak nízko lze pack reálně vybít.
 
 ## Hypotéza příčiny (neověřeno přímým měřením — viz [checklist](../diagnostics/checklist.md))
 
@@ -21,7 +22,7 @@
 
 **Proč se pack takhle rozjel: Enerkey balancer pravděpodobně nikdy nepracoval.**
 
-- Enerkey (aktivní balancer) má odhadovaný **aktivační práh napětí ~3,40–3,45 V/článek** pro LFP (nutno ověřit v datasheetu).
+- Enerkey (aktivní balancer) má nastavitelný aktivační práh napětí (**EqualizationVol**) — komunitně doporučovaná hodnota pro LFP je cca **3,41–3,44 V/článek**, přesná hodnota nastavená na tomto zařízení zatím není ověřená (viz [checklist](../diagnostics/checklist.md)).
 - Dokud automatizace držela pack pod 96 % SOC, pack se pravděpodobně **nikdy nedostal do napěťového okna**, kde balancer vůbec začíná pracovat.
 - Výsledek: **6 měsíců balancer prakticky nedělal nic** a rozjezd 270 mV se tiše nabaloval, aniž by to bylo někde vidět (SOC ukazoval zdánlivě rozumná čísla).
 
