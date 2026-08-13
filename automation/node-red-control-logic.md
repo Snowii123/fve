@@ -6,6 +6,16 @@ Cíl: nahradit manuální/jednorázový postup z [rebalancing-procedure.md](../d
 
 **Status: návrh, zatím neimplementováno.** Aktualizováno 13.8.2026 podle celodenní diagnostické session — viz [checklist](../diagnostics/checklist.md) a [fronius/README.md](../fronius/README.md) pro zdrojová data.
 
+## Meze toho, co tahle automatizace vůbec může vyřešit (nové, 13.8.2026)
+
+Sekundová rekonstrukce dvou epizod (17:15 a 17:18 UTC — viz [fronius/README.md](../fronius/README.md#sekundová-rekonstrukce-dvou-epizod-1382026-1715-1718-utc--pack-level-výkyv-nahoru-a-dolů-je-ve-skutečnosti-jeden-článek-utíkající-pryč)) ukázala, že to, co vypadá jako nestabilita packu, je pokaždé **jeden konkrétní vychýlený článek** utíkající k ~3,7-3,78 V, zatímco zbytek packu zaostává. To má přímý důsledek na to, co tahle automatizace realisticky umí:
+
+- **Umí zmírnit** — reaguje rychleji a plynuleji než binární blokování BMS (s jeho ~2s zpožděním), takže by měla snížit, jak vysoko a jak často vychýlený článek vystřelí, než ho něco zastaví. To dává balanceru (Enerkey, max 4 A) víc konzistentního času pracovat.
+- **Neumí vyrovnat náboj mezi články** — to umí jedině Enerkey balancer. Žádná úprava proudového limitu na úrovni celého packu nemůže sama o sobě přesunout energii z přebytého článku do zaostávajícího.
+- **Neumí opravit fyzicky vadný/slabý článek** — pokud je to pořád stejný 1-2 článek (viz otevřený bod v [checklistu](../diagnostics/checklist.md) k připojení Seplos BatteryMonitoru), žádná softwarová regulace to nevyřeší natrvalo — jen donekonečna zpomaluje, jak rychle na něj systém narazí. Skutečné řešení by pak bylo fyzické (kontrola spoje/výměna článku), ne další vrstva automatizace.
+
+➡️ **Proto má smysl nejdřív zjistit přes Seplos software, jestli je to pořád stejný článek, než se investuje čas do implementace.** Pokud ano, automatizace pomůže packu bezpečně fungovat, ale nenahradí opravu. Pokud se "nejhorší článek" mezi epizodami mění, jde spíš o obecnou nevyrovnanost, kde automatizace + trpělivost skutečně povede ke zlepšení.
+
 ## Co číst
 
 Battery data přes **jeden dotaz na kořenovou cestu `/`** battery service (`GetValue`), ne přes desítky jednotlivých cest — ověřeno v [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh), je to jednodušší i rychlejší, a je to jediný spolehlivý způsob, jak dostat `Alarms/*` pole na tomhle konkrétním driveru (`can-bus-bms`, fyzicky Seplos — viz [dbus-paths.md](../diagnostics/dbus-paths.md)). V Node-RED to znamená jeden `dbus-listener`/Function uzel čtoucí celý slovník najednou, ne 15+ samostatných subscriptions.

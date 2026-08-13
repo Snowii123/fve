@@ -146,6 +146,22 @@ Systém se opět neshodil do OFF (vebus_state zůstal 3), do 16:06 se sám stabi
 
 **Důsledek**: 10A nastavení ve VRM je *cíl*, ne garance — reálný proud může krátkodobě vyskočit řádově výš, přesně v momentech, kdy BMS mění svůj vlastní CCL. To posiluje důvod, proč navržená automatizace ([node-red-control-logic.md](../automation/node-red-control-logic.md)) staví primárně na `Alarms/*` polích (rychlá reakce na skutečný stav), ne na důvěře, že nastavený proudový strop bude vždy dodržen.
 
+### Sekundová rekonstrukce dvou epizod (13.8.2026, 17:15–17:18 UTC) — pack-level "výkyv nahoru a dolů" je ve skutečnosti jeden článek utíkající pryč
+
+Po dlouhé klidné fázi kolem 53,5 V následovaly v krátkém sledu dvě téměř identické epizody, zachycené v sekundovém rozlišení:
+
+**Epizoda 1 (17:15:30–17:15:56):**
+- Pack reálně stoupal 20 s v kuse: 53,52 V → **53,79 V** (denní maximum packu) — ale **nejvyšší článek souběžně vyletěl z 3,351 V na 3,706 V**, zatímco nejnižší klesl na 3,131 V. Nárůst packu byl tedy z drtivé části **jeden konkrétní článek utíkající pryč**, ne rovnoměrné nabíjení celého packu.
+- 17:15:51: BMS zasáhl — CCL na 0, `alarm_charge_blocked`, `dc_current_a` skutečně spadl na **0,0 A**.
+- Pack klesl zpět na 53,48 V, jak se ten článek bez proudu uvolnil.
+- 17:15:59–17:18:10: BMS sám postupně rampoval CCL zpět nahoru (6 A → 190 A za ~1,5 min — stejný ramp algoritmus jako ráno), proud se obnovil, ~2 minuty klid bez alarmu.
+
+**Epizoda 2 (17:18:13, oddělená, nová):**
+- Nejvyšší článek znovu vyskočil na **3,777 V**, nejnižší současně spadl na 3,169 V — `alarm_high_cell_voltage` **a** `alarm_charge_blocked` naskočily zároveň.
+- `dc_current_a` znovu spadl na 0,0 A, pack se ustálil na 53,54–53,59 V.
+
+**Interpretace**: co na pack-úrovni vypadá jako "napětí vystřelilo nahoru a pak zase kleslo", je ve skutečnosti **jeden vychýlený článek**, který se pokusí utéct k ~3,7-3,78 V, zatímco zbytek packu zaostává v pásmu 3,3-3,5 V — BMS ho po pár sekundách zastaví, článek se uvolní, a pack-level průměr to celé odzrcadlí nahoru-dolů, aniž by šlo o skutečné čisté nabití/vybití celého packu. To je zatím nejčistší zachycený důkaz, proč je sledování **pack napětí zavádějící** a proč je potřeba řídit podle `MaxCellVoltage` konkrétního článku (viz [node-red-control-logic.md](../automation/node-red-control-logic.md)).
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
