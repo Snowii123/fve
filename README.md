@@ -7,7 +7,7 @@ Dokumentace k diagnostice a řešení problémů na domácím FVE systému s hom
 - 6× Victron MultiPlus-II 48/3000/35-32 (ACOut2 switchable)
 - Fronius Symo 17,5 — AC-coupled FVE
 - Baterie: homemade pack, 32 článků, **2× nezávislý 16S string paralelně**, LFP, ~400 Ah, ~15 kWh využitelné kapacity
-- BMS: n-BMS, komunikace přes CAN-bus do Venus OS (managed battery)
+- BMS: n-BMS, fyzicky **Seplos**, komunikace přes CAN-bus do Venus OS (managed battery)
 - Aktivní balancer: Enerkey (samostatná jednotka pro každý string)
 - GX zařízení: Cerbo GX (Venus OS)
 
@@ -29,15 +29,15 @@ Diagnostika DVCC shutdownu po pokusu o kalibraci SOC, nevybalancovaný pack, dop
 - [`diagnostics/dbus-paths.md`](diagnostics/dbus-paths.md) — přehled D-Bus cest potřebných pro diagnostiku a automatizaci
 - [`diagnostics/checklist.md`](diagnostics/checklist.md) — otevřené položky k ověření na systému, včetně průběžných měření cell voltage spread
 
-### 2. Fronius / battery power mismatch — **odloženo, řeší se po dokončení kapitoly 1**
+### 2. Fronius / battery power mismatch — **aktivní práce, prolnulo s kapitolou 1**
 
-Fronius (17,5 kW inverter, aktuálně osazeno 12,5 kWp panelů) je podle oficiální Victron sizing guidance předimenzovaný vůči ~400 Ah packu — pack má cca poloviční kapacitu, než Victron pro lithiové baterie doporučuje už jen pro současné osazení panelů. Skokové PV výkonové špičky při rychlé změně ozáření mohou krátkodobě přestřelit nastavený nabíjecí limit (pozorováno 2 A nastaveno → ~30 A reálně) — pravděpodobně přímá souvislost s tím, proč byla historicky zavedená 96% cap automatizace (viz kapitola 1) a proč dobití na 100 % shazuje systém do OFF. Obsahuje i nastřelený návrh řešení (buffer řízený napětím článků, ne SOC).
+Fronius (17,5 kW inverter, aktuálně osazeno 12,5 kWp panelů) je podle oficiální Victron sizing guidance předimenzovaný vůči ~400 Ah packu. Původní hypotéza — že za nedodržováním proudového limitu stojí skokové PV výkonové špičky — byla **13.8.2026 vyvrácena**: nestabilita byla živě zachycena i při naprosto stabilním PV výkonu (~4,1 kW, žádné mraky). Skutečná příčina: vlastní rampovací algoritmus BMS (CCL roste v krocích až ke svému stropu 190 A) v kombinaci s nevyrovnaným packem, s odstupem ~2 s mezi prvním varovným alarmem a vlastním odříznutím proudu BMS. Na základě plné analýzy logu (35 alarmových epizod za 42 min) odvozen a **empiricky ověřený bezpečný proudový limit 10 A**.
 
 - [`fronius/README.md`](fronius/README.md) — popis problému s podloženými čísly, souvislost s kapitolou 1, návrh řešení a otevřené otázky
 
 ## Stav
 
-Diagnóza je z velké části **hypotéza odvozená z popisu chování systému, postupně ověřovaná měřením** (viz checklist). Některá zjištění (topologie packu, nastavení Enerkey) jsou už potvrzená přímo ze zařízení. Postup rebalance, doporučené sjednocení balancerů a návrh automatizace zatím nebyly na systému aplikovány.
+Většina klíčových čísel je už **potvrzená přímo ze zařízení** (topologie packu, Enerkey nastavení, `Info/MaxChargeVoltage` = 3,5625 V/článek, `Info/BatteryLowVoltage` = 2,9 V/článek, BMS = Seplos), ne jen odhad. Sjednocení Enerkey balancerů a rebalance packu **proběhly a fungují** (12.-13.8.2026, spread 270 mV → 2-3 mV). Bezpečný nabíjecí proud (10 A) je empiricky ověřený z živých dat. Návrh trvalé automatizace ([`automation/node-red-control-logic.md`](automation/node-red-control-logic.md)) je aktualizovaný podle těchto zjištění, ale **zatím neimplementovaný** na systému.
 
 ## Licence
 
