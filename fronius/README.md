@@ -69,16 +69,25 @@ RunVol (balancer aktivní)  <  V_buffer_ceiling (denní strop)  <  V_warn (n-BMS
 
 `RunVol` musí ležet s reálnou marží pod `V_buffer_ceiling` (ne těsně pod ním), aby pack při běžném dobíjení trávil v pracovním okně balanceru smysluplný čas každý den — ne jen pár vteřin těsně před stropem.
 
-### Prozatímní čísla (pracovní odhad — NEZAVÁDĚT bez ověření `V_hard`)
+### Aktualizace (13.8.2026): `V_hard` už není odhad
 
-| Práh | Prozatímní hodnota | Status |
+Přímým dotazem na n-BMS (`Info/MaxChargeVoltage`, viz [dbus-paths.md](../diagnostics/dbus-paths.md)) zjištěno: **57,0 V pack / 3,5625 V na článek**. To je hodnota, kterou BMS sám udává jako cíl/limit nabíjecího napětí — sedí těsně nad naším dřívějším odhadem (3,55–3,65 V), takže odhad byl rozumný, ale teď máme skutečné číslo místo dohadu.
+
+**Důležitá nuance**: `Info/MaxChargeVoltage` je BMS-vyžadovaný **cíl nabíjení** (to, co DVCC/nabíječi mají respektovat), ne nutně doslovný okamžik tvrdého odpojení — skutečný interní trip point BMS může ležet o něco výš, s vlastní rezervou výrobce. Pro nás je to ale prakticky jedno: **překročení právě týhle hodnoty je přesně to, co způsobilo problémy** (spike přes nastavený cíl), takže ji bereme jako náš efektivní `V_hard` pro návrhové účely, i když technicky nemusí být totožná se skutečným posledním trip pointem.
+
+Analogicky na dolním konci: `Info/BatteryLowVoltage` = **46,4 V / 2,9 V na článek** — přímo odpovídá na otázku "kde je bezpečné dno" z dřívější diskuze o vybíjení, a sedí přesně doprostřed tehdejšího odhadu (2,8–3,0 V).
+
+### Prozatímní čísla (aktualizováno s reálnými daty)
+
+| Práh | Hodnota | Status |
 |---|---|---|
-| `V_hard` (n-BMS tvrdý OV disconnect) | ~3,55–3,65 V (odhad) | **Neověřeno** — odvozeno z ekosystémové normy u podobných BMS (viz komunitní poznámka v [system-overview.md](../docs/system-overview.md#komunitně-doporučené-hodnoty-zdroje)), ne z dat tohoto konkrétního n-BMS. Nutno zjistit přímo. |
-| `V_buffer_ceiling` | **3,450 V** | Odhad ~100–200 mV pod `V_hard` — **bez zahrnuté marže na IR-drop výchylku ze špičky**, ta se teprve musí naměřit (viz níže). Číslo se pravděpodobně bude muset posunout níž. |
+| `V_hard` (= `Info/MaxChargeVoltage`) | **3,5625 V** (57,0 V pack) | **Potvrzeno přímo z n-BMS** (13.8.2026), s nuancí výše — je to BMS cíl, ne nutně doslovný trip point, ale efektivně to samé pro naše účely. |
+| `V_buffer_ceiling` | **3,450 V** (beze změny) | Teď ~112 mV pod potvrzeným `V_hard`, místo pod odhadem — pořád **bez zahrnuté marže na IR-drop výchylku ze špičky**, tu je pořád potřeba naměřit (viz metodika níže). |
 | `RunVol` (obě Enerkey jednotky) | **3,400 V** | 50 mV pod `V_buffer_ceiling` — dost na smysluplný denní dwell time v pracovním okně balanceru. |
 | `StopVol` | **3,300 V** | 100 mV hystereze pod `RunVol`. |
+| Dolní mez (pro budoucí kalibraci dolního konce, viz [rebalancing-procedure.md](../docs/rebalancing-procedure.md)) | **2,9 V** (46,4 V pack, = `Info/BatteryLowVoltage`) | **Potvrzeno přímo z n-BMS** (13.8.2026) |
 
-`V_hard` je jediné číslo v žebříčku, kde bych netoleroval "zkusíme a uvidíme" — pokud je ve skutečnosti nižší než odhad, celý žebříček se musí posunout dolů dřív, než se cokoliv z tohohle nasadí ostro.
+Zbývající neznámá: přesná IR-drop marže při reálné špičce — `V_buffer_ceiling` se pravděpodobně ještě posune, jakmile bude naměřená (viz metodika níže, teď realizovatelná přes [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) s cyklem ~1 s).
 
 ### Konkrétní návrh implementace
 
@@ -118,7 +127,7 @@ Doporučeno začít bodem 1 (zdarma, možná už tam odpověď je) a postupovat 
 
 ## Otevřené otázky / k ověření
 
-- [ ] Ověřit `V_hard` (tvrdý OV disconnect) přímo v n-BMS — nejdůležitější neznámá v celém žebříčku prahů výše.
+- [x] Ověřit `V_hard` přímo v n-BMS — **vyřešeno 13.8.2026**: `Info/MaxChargeVoltage` = 3,5625 V/článek (57,0 V pack). Viz nuance výše (cíl vs. doslovný trip point) a [dbus-paths.md](../diagnostics/dbus-paths.md).
 - [ ] Zjistit skutečnou IR-drop výchylku `MaxCellVoltage` (obou stringů) při reálné proudové špičce (2 A → ~30 A) — metodika a pořadí kroků viz výše. Klíčové pro doladění `V_buffer_ceiling`.
 - [x] Logovat/zkontrolovat výkon Fronia (PV output) společně s nabíjecím proudem a nastaveným limitem — potvrdit, že špičky časově korelují se skokovými změnami PV výkonu. **Vyvráceno**: špičky (3–4,5 A, občas 19 A i přes limit 2 A) nastaly i s Froniem fyzicky odpojeným na jističi. Viz oprava výše.
 - [ ] Zkontrolovat ESS nastavení, jestli neobsahuje analogii k "Allow DC MPPT to export" pro AC-coupled zdroj (feed-in excess / maximize export).

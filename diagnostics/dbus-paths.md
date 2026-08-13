@@ -6,7 +6,7 @@ Zjištěno přímo přes `ssh root@<cerbo> "dbus -y"` (viz [scripts/poll-cerbo.s
 
 | Service | Co to je |
 |---|---|
-| `com.victronenergy.battery.socketcan_can1` | n-BMS — **jediná battery service pro celý pack**. n-BMS prezentuje oba paralelní 16S stringy Venus OS jako jednu sjednocenou baterii, takže `System/MaxCellVoltage`/`MinCellVoltage` už zahrnují všech 32 článků najednou, ne jen jeden string. |
+| `com.victronenergy.battery.socketcan_can1` | n-BMS — **jediná battery service pro celý pack**. Zjištěno z live dat (13.8.2026): výrobce **SHEnergy**, produkt **CAN-SMARTBMS-BAT**, driver `can-bus-bms` (v0.71). n-BMS prezentuje oba paralelní 16S stringy Venus OS jako jednu sjednocenou baterii, takže `System/MaxCellVoltage`/`MinCellVoltage` už zahrnují všech 32 článků najednou, ne jen jeden string. Installed capacity 400 Ah (aktuálně 411 Ah), SOH 100 %. |
 | `com.victronenergy.grid.cgwacs_ttyUSB0_mb1` | grid meter (Carlo Gavazzi, přes Modbus/USB) |
 | `com.victronenergy.pvinverter.pv_44_2366585` | Fronius (AC-coupled PV inverter) |
 | `com.victronenergy.vebus.ttyS4` | cluster MultiPlus-II (6×) |
@@ -17,21 +17,38 @@ Pozn.: v seznamu je jen jedna battery service (`can1`), ne dvě — takže inter
 
 ## Cesty na battery service
 
-| Cesta | Význam |
-|---|---|
-| `com.victronenergy.battery.socketcan_can1/Dc/0/Voltage` | celková voltáž packu |
-| `com.victronenergy.battery.socketcan_can1/System/MaxCellVoltage` | napětí nejvyššího článku (napříč celým packem) |
-| `com.victronenergy.battery.socketcan_can1/System/MinCellVoltage` | napětí nejnižšího článku |
-| `com.victronenergy.battery.socketcan_can1/System/MaxVoltageCellId` | který "Pack" (16článková skupina) je aktuálně nejvyšší — ne konkrétní článek, na to je potřeba appka n-BMS |
-| `com.victronenergy.battery.socketcan_can1/System/MinVoltageCellId` | který "Pack" je aktuálně nejnižší |
-| `com.victronenergy.battery.socketcan_can1/Info/MaxChargeCurrent` | CCL — aktuální limit nabíjecího proudu hlášený BMS. **Oprava**: dřív jsem uváděl `Info/ChargeCurrentLimit`, což je špatně (vracelo prázdno) — správná cesta ověřena přes [dbus-systemcalc-py zdroj](https://github.com/victronenergy/dbus-systemcalc-py/blob/master/delegates/dvcc.py). |
-| `com.victronenergy.battery.socketcan_can1/Info/MaxDischargeCurrent` | DCL — analogicky, nezávisle neověřeno na tomhle systému |
-| `com.victronenergy.battery.socketcan_can1/Dc/0/Temperature` | teplota (pokud ji n-BMS na tuhle cestu publikuje — neověřeno, viz [scripts/poll-cerbo.sh](scripts/poll-cerbo.sh)) |
-| `com.victronenergy.battery.socketcan_can1/Soc` | SOC hlášený BMS (jen pro log/kontext, ne pro řízení — viz [soc-calibration.md](../docs/soc-calibration.md)) |
-| `com.victronenergy.battery.socketcan_can1/Dc/0/Current` | okamžitý DC proud baterie |
-| `com.victronenergy.battery.socketcan_can1/Alarms/LowVoltage`, `HighVoltage`, `HighCellVoltage`, `CellImbalance`, `HighChargeCurrent`, `HighChargeTemperature`, `LowChargeTemperature` | 0=OK, 1=Warning, 2=Alarm — **potenciálně klíčové**: pokud n-BMS hlásí Warning před tvrdým odpojením, tohle může přímo odhalit `V_warn`/`V_hard` v reálném čase ([zdroj](https://github.com/victronenergy/venus/wiki/dbus)) |
-| `com.victronenergy.vebus.ttyS4/State` | 0=Off, 2=Fault, 3=Bulk, 4=Absorption, 5=Float, 252=External control atd. — zachytí přesný okamžik pádu do OFF ([zdroj](https://community.victronenergy.com/questions/14089/ve-bus-state-codes.html)) |
-| `com.victronenergy.settings/Settings/SystemSetup/MaxChargeCurrent` | zápisový bod pro omezení max. nabíjecího proudu přes DVCC — **potvrzeno**, viz níže |
+**Důležitá zvláštnost tohoto driveru (can-bus-bms)**: individuální dotazy typu `dbus -y <service> /Alarms/LowVoltage GetValue` vrací prázdno, **i když ta hodnota reálně existuje a je 0 (OK)**. Tenhle driver zjevně nepublikuje `Alarms/*` (a řadu dalších polí) jako samostatně adresovatelné D-Bus objekty — jsou dostupné jen přes dotaz na **kořenovou cestu `/`**, která vrátí celý stav jako jeden vnořený slovník. Ověřeno 13.8.2026:
+
+```
+ssh root@<cerbo> "dbus -y com.victronenergy.battery.socketcan_can1 / GetValue"
+```
+
+[`scripts/poll-cerbo.sh`](scripts/poll-cerbo.sh) proto čte battery data přes tenhle jediný root dotaz, ne přes 25 jednotlivých cest — je to jednodušší i rychlejší.
+
+### Kompletní výpis klíčových polí z root dumpu (13.8.2026)
+
+| Pole | Hodnota (13.8.2026) | Význam |
+|---|---|---|
+| `Dc/0/Voltage` | 54,73 V | celková voltáž packu |
+| `Dc/0/Current` | 98,8 A | okamžitý DC proud |
+| `Dc/0/Temperature` | 37,9 °C | teplota (pack-level, jiný senzor než System/*CellTemperature) |
+| `System/MaxCellVoltage` / `MinCellVoltage` | 3,443 V / 3,410 V | napětí nejvyššího/nejnižšího článku napříč packem |
+| `System/MaxVoltageCellId` / `MinVoltageCellId` | `Pack-01#` / `Pack-01#` | který "Pack" (16článková skupina), ne konkrétní článek — na to je potřeba appka n-BMS |
+| `System/MaxCellTemperature` / `MinCellTemperature` | 29,0 °C / 26,0 °C | teplotní rozsah mezi moduly |
+| `System/MaxTemperatureCellId` / `MinTemperatureCellId` | `Pack-02#` / `Pack-01#` | potvrzuje existenci obou modulů (Pack-01, Pack-02) |
+| `System/NrOfModulesOnline` | 2 | oba stringy online |
+| `Info/MaxChargeCurrent` | 190 A | CCL. **Oprava**: dřív jsem uváděl špatnou cestu `Info/ChargeCurrentLimit` |
+| `Info/MaxDischargeCurrent` | 360 A | DCL |
+| **`Info/MaxChargeVoltage`** | **57,0 V (= 3,5625 V/článek)** | **Nejdůležitější nález** — cíl/limit nabíjecího napětí, který BMS udává. Nejbližší reálná hodnota k dlouho hledanému `V_hard` — viz [fronius/README.md](../fronius/README.md) a poznámka o nuanci "cíl vs. tvrdé odpojení" tam. |
+| **`Info/BatteryLowVoltage`** | **46,4 V (= 2,9 V/článek)** | Odpověď na otázku "kde je bezpečné dno" z diskuze o vybíjení — sedí přesně do dřívějšího odhadu 2,8–3,0 V/článek. |
+| `Soc` / `Soh` | 97,0 % / 100,0 % | SOC (jen log/kontext, viz [soc-calibration.md](../docs/soc-calibration.md)) a State of Health |
+| `Capacity` / `InstalledCapacity` | 411 Ah / 400 Ah | aktuální vs. instalovaná kapacita |
+| `Alarms/LowVoltage`, `HighCellVoltage`, `CellImbalance`, `ChargeBlocked`, `DischargeBlocked`, `HighChargeCurrent`, `HighDischargeCurrent`, `HighTemperature`, `LowTemperature`, `HighChargeTemperature`, `LowChargeTemperature`, `InternalFailure` | všech 12 = 0 (OK) | 0=OK, 1=Warning, 2=Alarm — **kompletní ověřený seznam** (pozn.: žádné samostatné `Alarms/HighVoltage`, jen `HighCellVoltage`) |
+| `Diagnostics/Module0..2/Alarms/*` | `[]` (prázdné) | per-modulová diagnostika **není** tímhle driverem publikovaná — nejde přes ni zjistit, který konkrétní modul by alarm spustil |
+
+`com.victronenergy.vebus.ttyS4/State` — 0=Off, 2=Fault, 3=Bulk, 4=Absorption, 5=Float, 252=External control atd. — zachytí přesný okamžik pádu do OFF ([zdroj](https://community.victronenergy.com/questions/14089/ve-bus-state-codes.html)). Tahle cesta funguje standardně (individuální dotaz), rootdump quirk se týká jen battery service.
+
+`com.victronenergy.settings/Settings/SystemSetup/MaxChargeCurrent` — zápisový bod pro omezení max. nabíjecího proudu přes DVCC — **potvrzeno**, viz níže.
 
 ## Cesty pro zápis (potvrzeno z exportu Node-RED flow, viz [`automation/current-node-red-flow.md`](../automation/current-node-red-flow.md))
 

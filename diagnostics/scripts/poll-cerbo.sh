@@ -5,8 +5,18 @@
 # the machine you execute it from (e.g. your Mac) — nothing is written to
 # the Cerbo's own storage. Each cycle streams a small Python script over
 # SSH stdin into a `python3` process on the Cerbo (nothing saved there —
-# the process exists only for the duration of that one SSH call); the
-# script opens ONE D-Bus connection and reads every value through it.
+# the process exists only for the duration of that one SSH call).
+#
+# BATTERY VALUES: read via a single GetValue on the battery service's
+# root path "/" — the SHEnergy CAN-SMARTBMS-BAT (driver: can-bus-bms)
+# on this system exports its entire state as one nested dict this way.
+# Individual per-path queries (e.g. .../Alarms/LowVoltage GetValue)
+# returned empty for the Alarms/* fields on this driver even though
+# they're genuinely present (all 0/OK) in the root dump — this driver
+# apparently only populates them at the root-item level, not as
+# separately addressable objects. The root-dump approach sidesteps
+# that and is simpler/faster than the previous 25-separate-paths
+# version besides.
 #
 # READ-ONLY, VERIFIED: the Python script only ever calls the D-Bus
 # `com.victronenergy.BusItem.GetValue` method (no arguments, a pure
@@ -17,12 +27,6 @@
 #     https://www.victronenergy.com/live/open_source:ccgx:commandline?do=export_pdf&rev=1615037933
 #   - velib_python vedbus.py (defines the BusItem interface):
 #     https://github.com/victronenergy/velib_python/blob/master/vedbus.py
-#   - D-Bus round-trip performance expectations (tens of ms is normal):
-#     https://communityarchive.victronenergy.com/questions/237145/venus-gx-d-bus-round-trip-time-too-high.html
-#   - Correct CCL path is /Info/MaxChargeCurrent, not /Info/ChargeCurrentLimit:
-#     https://github.com/victronenergy/dbus-systemcalc-py/blob/master/delegates/dvcc.py
-#   - Battery alarm paths (0=OK, 1=Warning, 2=Alarm):
-#     https://github.com/victronenergy/venus/wiki/dbus
 #   - vebus /State value meanings (0=Off, 2=Fault, 3=Bulk, 4=Absorption,
 #     5=Float, 252=External control, etc.):
 #     https://community.victronenergy.com/questions/14089/ve-bus-state-codes.html
@@ -30,37 +34,22 @@
 # WHY THESE FIELDS: designed for two purposes — (1) catching the exact
 # voltage/current at which the pack trips during top-end calibration,
 # and (2) the same for the Fronius power-mismatch buffer work later
-# (see ../../fronius/README.md) — so this one script/log format covers
-# both without needing to re-instrument later. The alarm fields in
-# particular may reveal the n-BMS's actual warning/hard thresholds
-# (V_warn/V_hard) in real time, which we've had to estimate blindly
-# so far — see checklist.md.
+# (see ../../fronius/README.md). Info/MaxChargeVoltage and
+# Info/BatteryLowVoltage are the BMS's own commanded charge/discharge
+# voltage targets — the closest thing we have to real V_hard/floor
+# numbers instead of estimates, see checklist.md.
 #
 # PREREQUISITES on the Cerbo:
 #   Remote Console -> Settings -> General -> Access Level: Superuser,
 #   then "Set root password" (min 6 chars) and enable "SSH on LAN".
-#   Note: the root password is reset on every Venus OS firmware update
-#   (it lives on the rootfs, which gets replaced) — you'll need to set
-#   it again after an update.
+#   Note: the root password is reset on every Venus OS firmware update.
 #
 # SERVICE NAMES confirmed on this system via `dbus -y` on 13.8.2026:
 #   battery: com.victronenergy.battery.socketcan_can1
-#     (single service for the whole pack — the n-BMS presents both
-#     parallel 16S strings as one unified battery to Venus OS; the
-#     max/min cell IDs it reports identify which 16-cell "Pack" the
-#     extreme is in, e.g. "Pack-01#", NOT the individual cell number
-#     within that pack — for that you need the n-BMS's own app)
 #   grid meter: com.victronenergy.grid.cgwacs_ttyUSB0_mb1
 #   PV inverter (Fronius): com.victronenergy.pvinverter.pv_44_2366585
 #   vebus (MultiPlus-II cluster): com.victronenergy.vebus.ttyS4
-# If any of these change, rediscover with:
-#   ssh root@<cerbo-host> "dbus -y"
-# and pass the new value as an argument below.
-#
-# Some fields below (temperature, discharge current limit) are included
-# by convention/symmetry with confirmed paths but not independently
-# verified on this system — if the path doesn't exist they'll just come
-# back empty (harmless), same as the rest of the error handling here.
+# If any of these change, rediscover with: ssh root@<cerbo-host> "dbus -y"
 #
 # USAGE:
 #   ./poll-cerbo.sh <cerbo-host> [interval-seconds] [output.csv] [battery-svc] [grid-svc] [pv-svc] [vebus-svc]
@@ -82,14 +71,12 @@ GRID_SVC="${5:-com.victronenergy.grid.cgwacs_ttyUSB0_mb1}"
 PV_SVC="${6:-com.victronenergy.pvinverter.pv_44_2366585}"
 VEBUS_SVC="${7:-com.victronenergy.vebus.ttyS4}"
 
-# SSH connection multiplexing: reuse one authenticated connection for
-# every poll instead of a fresh handshake each cycle.
 SSH_SOCKET="/tmp/cerbo-ssh-$$.sock"
 SSH_OPTS=(-o ControlMaster=auto -o ControlPersist=600 -o ControlPath="$SSH_SOCKET")
 cleanup() { ssh "${SSH_OPTS[@]}" -O exit "root@${CERBO_HOST}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-HEADER="timestamp,poll_duration_s,pack_voltage_v,max_cell_v,min_cell_v,max_cell_id,min_cell_id,dc_current_a,charge_current_limit_a,discharge_current_limit_a,battery_temp_c,soc_pct,alarm_low_voltage,alarm_high_voltage,alarm_high_cell_voltage,alarm_cell_imbalance,alarm_high_charge_current,alarm_high_charge_temp,alarm_low_charge_temp,vebus_state,grid_l1_w,grid_l2_w,grid_l3_w,pv_l1_w,pv_l2_w,pv_l3_w,pv_total_w"
+HEADER="timestamp,poll_duration_s,pack_voltage_v,max_cell_v,min_cell_v,max_cell_id,min_cell_id,dc_current_a,charge_current_limit_a,discharge_current_limit_a,max_charge_voltage_v,low_voltage_cutoff_v,battery_temp_c,max_cell_temp_c,min_cell_temp_c,soc_pct,soh_pct,alarm_low_voltage,alarm_high_cell_voltage,alarm_cell_imbalance,alarm_charge_blocked,alarm_discharge_blocked,alarm_high_charge_current,alarm_high_discharge_current,alarm_high_temperature,alarm_low_temperature,alarm_high_charge_temp,alarm_low_charge_temp,alarm_internal_failure,vebus_state,grid_l1_w,grid_l2_w,grid_l3_w,pv_l1_w,pv_l2_w,pv_l3_w,pv_total_w"
 
 echo "Logging to $OUT every ${INTERVAL}s on ${CERBO_HOST}."
 echo "  battery: $BATTERY_SVC"
@@ -99,35 +86,61 @@ echo "  vebus:   $VEBUS_SVC"
 echo "Ctrl+C to stop."
 echo "$HEADER" > "$OUT"
 
-# warm up the multiplexed connection once (asks for a login, first time only)
 ssh "${SSH_OPTS[@]}" "root@${CERBO_HOST}" true
 
-# Python payload: one D-Bus connection, reads every path, prints a single
-# comma-separated line. Fed over SSH stdin each cycle — never written to
-# a file on the Cerbo. Takes service names as argv so the script itself
-# doesn't need editing if a service name changes.
 read -r -d '' PY_SCRIPT <<'PYEOF' || true
 import dbus, sys
 bus = dbus.SystemBus()
 BATTERY, GRID, PV, VEBUS = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-paths = [
-    (BATTERY, "/Dc/0/Voltage"),
-    (BATTERY, "/System/MaxCellVoltage"),
-    (BATTERY, "/System/MinCellVoltage"),
-    (BATTERY, "/System/MaxVoltageCellId"),
-    (BATTERY, "/System/MinVoltageCellId"),
-    (BATTERY, "/Dc/0/Current"),
-    (BATTERY, "/Info/MaxChargeCurrent"),
-    (BATTERY, "/Info/MaxDischargeCurrent"),
-    (BATTERY, "/Dc/0/Temperature"),
-    (BATTERY, "/Soc"),
-    (BATTERY, "/Alarms/LowVoltage"),
-    (BATTERY, "/Alarms/HighVoltage"),
-    (BATTERY, "/Alarms/HighCellVoltage"),
-    (BATTERY, "/Alarms/CellImbalance"),
-    (BATTERY, "/Alarms/HighChargeCurrent"),
-    (BATTERY, "/Alarms/HighChargeTemperature"),
-    (BATTERY, "/Alarms/LowChargeTemperature"),
+
+def get(service, path):
+    try:
+        obj = bus.get_object(service, path)
+        return obj.GetValue(dbus_interface="com.victronenergy.BusItem")
+    except Exception:
+        return None
+
+battery_root = get(BATTERY, "/")
+if not isinstance(battery_root, dict):
+    battery_root = {}
+
+def bkey(k):
+    v = battery_root.get(k)
+    if v is None or v == []:
+        return ""
+    return str(v)
+
+battery_fields = [
+    bkey("Dc/0/Voltage"),
+    bkey("System/MaxCellVoltage"),
+    bkey("System/MinCellVoltage"),
+    bkey("System/MaxVoltageCellId"),
+    bkey("System/MinVoltageCellId"),
+    bkey("Dc/0/Current"),
+    bkey("Info/MaxChargeCurrent"),
+    bkey("Info/MaxDischargeCurrent"),
+    bkey("Info/MaxChargeVoltage"),
+    bkey("Info/BatteryLowVoltage"),
+    bkey("Dc/0/Temperature"),
+    bkey("System/MaxCellTemperature"),
+    bkey("System/MinCellTemperature"),
+    bkey("Soc"),
+    bkey("Soh"),
+    bkey("Alarms/LowVoltage"),
+    bkey("Alarms/HighCellVoltage"),
+    bkey("Alarms/CellImbalance"),
+    bkey("Alarms/ChargeBlocked"),
+    bkey("Alarms/DischargeBlocked"),
+    bkey("Alarms/HighChargeCurrent"),
+    bkey("Alarms/HighDischargeCurrent"),
+    bkey("Alarms/HighTemperature"),
+    bkey("Alarms/LowTemperature"),
+    bkey("Alarms/HighChargeTemperature"),
+    bkey("Alarms/LowChargeTemperature"),
+    bkey("Alarms/InternalFailure"),
+]
+
+other_paths = [
     (VEBUS, "/State"),
     (GRID, "/Ac/L1/Power"),
     (GRID, "/Ac/L2/Power"),
@@ -137,15 +150,12 @@ paths = [
     (PV, "/Ac/L3/Power"),
     (PV, "/Ac/Power"),
 ]
-out = []
-for service, path in paths:
-    try:
-        obj = bus.get_object(service, path)
-        val = obj.GetValue(dbus_interface="com.victronenergy.BusItem")
-        out.append(str(val))
-    except Exception:
-        out.append("")
-print(",".join(out))
+other_fields = []
+for service, path in other_paths:
+    v = get(service, path)
+    other_fields.append("" if v is None else str(v))
+
+print(",".join(battery_fields + other_fields))
 PYEOF
 
 while true; do
