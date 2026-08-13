@@ -121,6 +121,27 @@ Zdánlivě nelogické — SOC 98 %, limit nabíjecího proudu 10 A, a přesto pr
 - **Dlouhodobě**: implementovat [node-red-control-logic.md](../automation/node-red-control-logic.md) s dnes potvrzenými reálnými čísly (3,5625 V strop, 10 A funkční hranice) místo odhadů — externí smyčka řízená podle `MaxCellVoltage` by proud zpomalila plynule, dřív, než vychýlený článek stihne vystřelit a BMS ho tvrdě zablokuje.
 - **Stojí za ověření**: pokud se stejný extrémní vzorec (jeden článek nahoru, jiný dolů) opakuje na stejném konkrétním článku, může jít o fyzicky problémový článek/spoj, ne jen o balanc — ověřit přes Seplos software (viz [dbus-paths.md](../diagnostics/dbus-paths.md#bms-je-seplos-ne-shenergy--přímá-konfigurace-přes-výrobcův-software)), pokud ukazuje historii per-článek.
 
+### Druhá epizoda nestability (13.8.2026, 15:55–16:03 UTC) — horší než cokoliv dosud zaznamenaného
+
+Necelou hodinu po stabilizaci v 15:06 UTC (viz výše) se v novém logu (`cerbo-log-20260813-174927.csv`) objevila **další, výrazně horší epizoda**, i přes nastavený 10A limit v "Keep batteries charged":
+
+| Veličina | Hodnota | Čas (UTC) |
+|---|---|---|
+| Rozjezd (spread) | **882 mV** (max 3,694 V / min 2,812 V) | 15:59:02 |
+| Nejvyšší napětí článku | **3,844 V** (nad `Info/MaxChargeVoltage` 3,5625 V i nad dosavadním denním maximem 3,867 V z rána) | 16:01:38 |
+| Reálný proud | **41,2 A** (přes 4× nad nastavený 10A strop) | 16:00:40 |
+| `Info/MaxChargeCurrent` (CCL z BMS) v tu dobu | 182–190 A | — |
+
+Systém se opět neshodil do OFF (vebus_state zůstal 3), do 16:06 se sám stabilizoval zpět na rozjezd ~2 mV. Zajímavé je, že tahle epizoda **nastala během grid-nabíjení ("Keep batteries charged"), ne během PV**, a je horší, než ranní PV-epizoda z 14:24 UTC — takže jev evidentně **není vázaný na konkrétní zdroj nabíjení** (grid vs. AC-coupled PV), objevuje se v obou.
+
+**Proč reálný proud vůbec překročil nastavený 10A limit — zjištěno z Victron komunity/dokumentace (13.8.2026):**
+
+1. **DVCC řídí proud přes napěťový rozdíl, ne jako okamžitý tvrdý strop.** Podle Victron Community Managera je algoritmus "inherently gradual and continuous, not binary" — Multi reguluje proud přes rozdíl mezi svým DC napětím a napětím baterie, ne přes jednorázové odříznutí na přesnou hodnotu ([How does the AC PV Frequency Shift algorithm work?](https://community.victronenergy.com/questions/227200/frequency-shift-algortihm.html)). Při rychlé změně (BMS mění vlastní CCL 190→182→186 A přesně v okně naší špičky) tak dochází k dočasnému rozjetí, než se smyčka doreguluje.
+2. **Zdokumentovaný, oficiálně potvrzený case: když je v ESS zapnutý "feed-in"/přebytek do sítě, DVCC v mnoha konfiguracích CCL z BMS úplně ignoruje** a řídí se jen podle CVL (napěťového stropu), ne podle proudu — Victron to zdůvodňuje tím, že kombinace nízkého CCL s feed-inem by jinak způsobovala oscilace v regulaci ([ESS - DC Feed-in enabled, Charge Current Limit (CCL) from BMS ignored](https://communityarchive.victronenergy.com/questions/106290/bug-in-ess-dc-feed-in-enabled-charge-current-limit.html)). Podle stejného vlákna **grid-nabíjení (bez DC feed-in) by CCL mělo respektovat** — což je zajímavé v kontrastu s tím, že naše špička nastala právě při grid-nabíjení; **stojí za ověření, jestli má tenhle systém zapnutý export/feed-in přebytků i mimo PV** (viz akční bod v checklistu).
+3. **Nezávisle potvrzeno i pro samotné napěťové překmity**: komunitní zdroje popisují přesně náš mechanismus — "possible causes of overshoot include BMS cell balancing issues, where one or two cells need charge bled down but balancing boards are not quick enough, causing the whole bank to rise" a doporučují **snížit nabíjecí proud**, což je přesně směr, který jsme dnes zvolili ([DVCC limit charge current does not work](https://communityarchive.victronenergy.com/questions/87377/dvcc-limit-charge-current-does-not-work.html)).
+
+**Důsledek**: 10A nastavení ve VRM je *cíl*, ne garance — reálný proud může krátkodobě vyskočit řádově výš, přesně v momentech, kdy BMS mění svůj vlastní CCL. To posiluje důvod, proč navržená automatizace ([node-red-control-logic.md](../automation/node-red-control-logic.md)) staví primárně na `Alarms/*` polích (rychlá reakce na skutečný stav), ne na důvěře, že nastavený proudový strop bude vždy dodržen.
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
