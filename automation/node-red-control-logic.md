@@ -86,8 +86,18 @@ Dřívější verze tohoto dokumentu přisuzovala nepřesnost `MaxChargeCurrent`
 
 - Node-RED addon zapnutý ve Venus OS (Large image) — běží jako služba přímo na Cerbu 24/7.
 - Battery data číst přes jeden root-dump dotaz (viz výše), ne přes desítky samostatných subscriptions — jednodušší a rychlejší.
-- Stav (aktuální režim, poslední spread) ukládat do flow/global contextu s perzistencí, ať přežije restart.
-- Logovat každý cyklus/změnu stavu: timestamp, SOC (jen kontext), MaxCellVoltage, MinCellVoltage, spread, CCL, Alarms/*, vebus State, aktuálně nastavený proud — v podstatě totéž, co dnes loguje [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh), jen zapisované přímo na Cerbu místo přes SSH z Macu.
+### Pozor na opotřebení interní eMMC — NEUKLÁDAT na disk každý cyklus (nové, 13.8.2026)
+
+**Oprava dřívější verze**: tenhle dokument dřív navrhoval logovat "každý cyklus/změnu stavu" přímo na Cerbu, stejně podrobně jako dnes loguje [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) z Macu (~1 Hz). **To by na Cerbu bylo špatně** — interní eMMC je pájená na desce (na rozdíl od SD karty se při opotřebení nedá vyměnit) a `/data` partition (jediné místo, co přežije update firmwaru) má typicky jen ~500 MB. Zdokumentovaný reálný případ z Victron komunity: uživatel s ~1 000 000 zápisů/den z Node-RED degradoval interní paměť a musel přejít na externí USB disk ([data logger for Cerbo GX using node-red](https://community.victronenergy.com/t/has-anyone-developed-a-data-logger-for-cerbo-gx-using-node-red/21896)). Komunitní doporučení pro "lehkou" zátěž je hodinové logování, řádově 10 proměnných — s výslovným varováním, že vyšší frekvence generuje "hodně dat".
+
+**Revidovaný návrh:**
+
+1. **Řídicí smyčka (~1 s, čtení/zápis D-Bus hodnot) sama o sobě nic nezapisuje na disk** — D-Bus je jen meziprocesová komunikace v RAM, žádný flash wear. Tahle část může běžet na 1 Hz bez obav.
+2. **Live stav pro dashboard tile** (aktuální proud, MaxCellVoltage, spread) držet jen v Node-RED **flow/global contextu (RAM)**, ne perzistovat na disk každý tick.
+3. **Na disk zapisovat jen při skutečné události** — změna regulačního stupně, nasazení/zmizení alarmu — ne při každém cyklu. Pokud regulátor funguje jak má, půjde o řádově jednotky/desítky zápisů denně.
+4. **Detailní 1Hz historie pro diagnostiku zůstává na Macu** přes [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) (SSH, čistě read-only, nic nezapisuje na Cerbu) — není důvod tohle přesouvat na zařízení samotné.
+5. Pokud by časem byla potřeba i on-device historie s vyšším rozlišením: publikovat přes **MQTT na externí broker** (Mac/NAS), ne do lokálního souboru — zápisy pak přistanou na úložišti k tomu určeném. Případnou lokální potřebu řešit přes **externí SD/USB kartu (ext3/4, ne FAT — jinak nejdou nastavit práva)**, ne přes interní eMMC.
+6. Perzistentní stav napříč restarty (pokud vůbec potřeba) ukládat jen zřídka (řádově jednotky minut, ne každý cyklus) a jen do `/data/...` — jediné místo, co přežije update firmwaru.
 
 ## Vztah k nativním funkcím BMS (nové, 13.8.2026)
 
