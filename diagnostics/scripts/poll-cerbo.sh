@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 #
-# poll-cerbo.sh — poll battery + grid + AC-coupled PV D-Bus values from a
-# Victron Cerbo GX over SSH and log them locally. Runs entirely on the
-# machine you execute it from (e.g. your Mac) — nothing is written to
+# poll-cerbo.sh — poll battery + grid + AC-coupled PV + vebus D-Bus values
+# from a Victron Cerbo GX over SSH and log them locally. Runs entirely on
+# the machine you execute it from (e.g. your Mac) — nothing is written to
 # the Cerbo's own storage. Each cycle streams a small Python script over
 # SSH stdin into a `python3` process on the Cerbo (nothing saved there —
 # the process exists only for the duration of that one SSH call); the
-# script opens ONE D-Bus connection and reads every value through it,
-# instead of the earlier version's approach of spawning the `dbus -y`
-# CLI tool 15 separate times per cycle (measured at ~16s/cycle — each
-# `dbus -y` invocation pays its own process-startup cost; a normal D-Bus
-# round-trip should be tens of milliseconds, not ~1s, see sources below).
+# script opens ONE D-Bus connection and reads every value through it.
 #
 # READ-ONLY, VERIFIED: the Python script only ever calls the D-Bus
 # `com.victronenergy.BusItem.GetValue` method (no arguments, a pure
@@ -23,9 +19,22 @@
 #     https://github.com/victronenergy/velib_python/blob/master/vedbus.py
 #   - D-Bus round-trip performance expectations (tens of ms is normal):
 #     https://communityarchive.victronenergy.com/questions/237145/venus-gx-d-bus-round-trip-time-too-high.html
-#   - Correct CCL path is /Info/MaxChargeCurrent, not /Info/ChargeCurrentLimit
-#     (the earlier version of this script used the wrong path):
+#   - Correct CCL path is /Info/MaxChargeCurrent, not /Info/ChargeCurrentLimit:
 #     https://github.com/victronenergy/dbus-systemcalc-py/blob/master/delegates/dvcc.py
+#   - Battery alarm paths (0=OK, 1=Warning, 2=Alarm):
+#     https://github.com/victronenergy/venus/wiki/dbus
+#   - vebus /State value meanings (0=Off, 2=Fault, 3=Bulk, 4=Absorption,
+#     5=Float, 252=External control, etc.):
+#     https://community.victronenergy.com/questions/14089/ve-bus-state-codes.html
+#
+# WHY THESE FIELDS: designed for two purposes — (1) catching the exact
+# voltage/current at which the pack trips during top-end calibration,
+# and (2) the same for the Fronius power-mismatch buffer work later
+# (see ../../fronius/README.md) — so this one script/log format covers
+# both without needing to re-instrument later. The alarm fields in
+# particular may reveal the n-BMS's actual warning/hard thresholds
+# (V_warn/V_hard) in real time, which we've had to estimate blindly
+# so far — see checklist.md.
 #
 # PREREQUISITES on the Cerbo:
 #   Remote Console -> Settings -> General -> Access Level: Superuser,
@@ -43,12 +52,18 @@
 #     within that pack — for that you need the n-BMS's own app)
 #   grid meter: com.victronenergy.grid.cgwacs_ttyUSB0_mb1
 #   PV inverter (Fronius): com.victronenergy.pvinverter.pv_44_2366585
+#   vebus (MultiPlus-II cluster): com.victronenergy.vebus.ttyS4
 # If any of these change, rediscover with:
 #   ssh root@<cerbo-host> "dbus -y"
 # and pass the new value as an argument below.
 #
+# Some fields below (temperature, discharge current limit) are included
+# by convention/symmetry with confirmed paths but not independently
+# verified on this system — if the path doesn't exist they'll just come
+# back empty (harmless), same as the rest of the error handling here.
+#
 # USAGE:
-#   ./poll-cerbo.sh <cerbo-host> [interval-seconds] [output.csv] [battery-svc] [grid-svc] [pv-svc]
+#   ./poll-cerbo.sh <cerbo-host> [interval-seconds] [output.csv] [battery-svc] [grid-svc] [pv-svc] [vebus-svc]
 #
 # EXAMPLE (first run — measure real achievable cycle time, no sleep):
 #   ./poll-cerbo.sh 192.168.2.188 0
@@ -59,12 +74,13 @@
 
 set -euo pipefail
 
-CERBO_HOST="${1:?usage: poll-cerbo.sh <cerbo-host> [interval] [output.csv] [battery-svc] [grid-svc] [pv-svc]}"
+CERBO_HOST="${1:?usage: poll-cerbo.sh <cerbo-host> [interval] [output.csv] [battery-svc] [grid-svc] [pv-svc] [vebus-svc]}"
 INTERVAL="${2:-1}"
 OUT="${3:-cerbo-log-$(date +%Y%m%d-%H%M%S).csv}"
 BATTERY_SVC="${4:-com.victronenergy.battery.socketcan_can1}"
 GRID_SVC="${5:-com.victronenergy.grid.cgwacs_ttyUSB0_mb1}"
 PV_SVC="${6:-com.victronenergy.pvinverter.pv_44_2366585}"
+VEBUS_SVC="${7:-com.victronenergy.vebus.ttyS4}"
 
 # SSH connection multiplexing: reuse one authenticated connection for
 # every poll instead of a fresh handshake each cycle.
@@ -73,12 +89,13 @@ SSH_OPTS=(-o ControlMaster=auto -o ControlPersist=600 -o ControlPath="$SSH_SOCKE
 cleanup() { ssh "${SSH_OPTS[@]}" -O exit "root@${CERBO_HOST}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-HEADER="timestamp,poll_duration_s,max_cell_v,min_cell_v,max_cell_id,min_cell_id,dc_current_a,charge_current_a,soc_pct,grid_l1_w,grid_l2_w,grid_l3_w,pv_l1_w,pv_l2_w,pv_l3_w,pv_total_w"
+HEADER="timestamp,poll_duration_s,pack_voltage_v,max_cell_v,min_cell_v,max_cell_id,min_cell_id,dc_current_a,charge_current_limit_a,discharge_current_limit_a,battery_temp_c,soc_pct,alarm_low_voltage,alarm_high_voltage,alarm_high_cell_voltage,alarm_cell_imbalance,alarm_high_charge_current,alarm_high_charge_temp,alarm_low_charge_temp,vebus_state,grid_l1_w,grid_l2_w,grid_l3_w,pv_l1_w,pv_l2_w,pv_l3_w,pv_total_w"
 
 echo "Logging to $OUT every ${INTERVAL}s on ${CERBO_HOST}."
 echo "  battery: $BATTERY_SVC"
 echo "  grid:    $GRID_SVC"
 echo "  pv:      $PV_SVC"
+echo "  vebus:   $VEBUS_SVC"
 echo "Ctrl+C to stop."
 echo "$HEADER" > "$OUT"
 
@@ -87,20 +104,31 @@ ssh "${SSH_OPTS[@]}" "root@${CERBO_HOST}" true
 
 # Python payload: one D-Bus connection, reads every path, prints a single
 # comma-separated line. Fed over SSH stdin each cycle — never written to
-# a file on the Cerbo. Takes battery/grid/pv service names as argv so the
-# script itself doesn't need editing if a service name changes.
+# a file on the Cerbo. Takes service names as argv so the script itself
+# doesn't need editing if a service name changes.
 read -r -d '' PY_SCRIPT <<'PYEOF' || true
 import dbus, sys
 bus = dbus.SystemBus()
-BATTERY, GRID, PV = sys.argv[1], sys.argv[2], sys.argv[3]
+BATTERY, GRID, PV, VEBUS = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 paths = [
+    (BATTERY, "/Dc/0/Voltage"),
     (BATTERY, "/System/MaxCellVoltage"),
     (BATTERY, "/System/MinCellVoltage"),
     (BATTERY, "/System/MaxVoltageCellId"),
     (BATTERY, "/System/MinVoltageCellId"),
     (BATTERY, "/Dc/0/Current"),
     (BATTERY, "/Info/MaxChargeCurrent"),
+    (BATTERY, "/Info/MaxDischargeCurrent"),
+    (BATTERY, "/Dc/0/Temperature"),
     (BATTERY, "/Soc"),
+    (BATTERY, "/Alarms/LowVoltage"),
+    (BATTERY, "/Alarms/HighVoltage"),
+    (BATTERY, "/Alarms/HighCellVoltage"),
+    (BATTERY, "/Alarms/CellImbalance"),
+    (BATTERY, "/Alarms/HighChargeCurrent"),
+    (BATTERY, "/Alarms/HighChargeTemperature"),
+    (BATTERY, "/Alarms/LowChargeTemperature"),
+    (VEBUS, "/State"),
     (GRID, "/Ac/L1/Power"),
     (GRID, "/Ac/L2/Power"),
     (GRID, "/Ac/L3/Power"),
@@ -124,8 +152,8 @@ while true; do
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   t_start=$(date +%s.%N)
 
-  line=$(ssh "${SSH_OPTS[@]}" "root@${CERBO_HOST}" python3 - "$BATTERY_SVC" "$GRID_SVC" "$PV_SVC" <<< "$PY_SCRIPT" 2>/dev/null) \
-    || { echo "$ts,,ERROR,,,,,,,,,,,,," >> "$OUT"; sleep "$INTERVAL"; continue; }
+  line=$(ssh "${SSH_OPTS[@]}" "root@${CERBO_HOST}" python3 - "$BATTERY_SVC" "$GRID_SVC" "$PV_SVC" "$VEBUS_SVC" <<< "$PY_SCRIPT" 2>/dev/null) \
+    || { echo "$ts,,ERROR" >> "$OUT"; sleep "$INTERVAL"; continue; }
 
   t_end=$(date +%s.%N)
   dur=$(awk -v a="$t_start" -v b="$t_end" 'BEGIN { printf "%.2f", b - a }')
