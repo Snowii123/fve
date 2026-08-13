@@ -6,7 +6,7 @@ Zjištěno přímo přes `ssh root@<cerbo> "dbus -y"` (viz [scripts/poll-cerbo.s
 
 | Service | Co to je |
 |---|---|
-| `com.victronenergy.battery.socketcan_can1` | n-BMS — **jediná battery service pro celý pack**. Zjištěno z live dat (13.8.2026): výrobce **SHEnergy**, produkt **CAN-SMARTBMS-BAT**, driver `can-bus-bms` (v0.71). n-BMS prezentuje oba paralelní 16S stringy Venus OS jako jednu sjednocenou baterii, takže `System/MaxCellVoltage`/`MinCellVoltage` už zahrnují všech 32 článků najednou, ne jen jeden string. Installed capacity 400 Ah (aktuálně 411 Ah), SOH 100 %. |
+| `com.victronenergy.battery.socketcan_can1` | n-BMS — **jediná battery service pro celý pack**. **Oprava (13.8.2026)**: D-Bus hlásí `Manufacturer: SHEnergy`, ale to je jen artefakt CAN protokolu — fyzický hardware je **Seplos** (potvrzeno uživatelem + komunitní zkušenosti: Seplos BMS se po nahrání Victron-CAN profilu navenek hlásí jako "SHEnergy", viz [Victron Community](https://communityarchive.victronenergy.com/questions/257352/victron-shunt-and-seplos-bms.html)). Nevíme jistě, jestli jde o V2 nebo V3 generaci — ověřit podle štítku na fyzické jednotce. Driver na Venus OS: `can-bus-bms` (v0.71), `ProductName: CAN-SMARTBMS-BAT`. n-BMS prezentuje oba paralelní 16S stringy Venus OS jako jednu sjednocenou baterii, takže `System/MaxCellVoltage`/`MinCellVoltage` už zahrnují všech 32 článků najednou, ne jen jeden string. Installed capacity 400 Ah (aktuálně 411 Ah), SOH 100 %. |
 | `com.victronenergy.grid.cgwacs_ttyUSB0_mb1` | grid meter (Carlo Gavazzi, přes Modbus/USB) |
 | `com.victronenergy.pvinverter.pv_44_2366585` | Fronius (AC-coupled PV inverter) |
 | `com.victronenergy.vebus.ttyS4` | cluster MultiPlus-II (6×) |
@@ -83,6 +83,21 @@ Používá [`scripts/poll-cerbo.sh`](scripts/poll-cerbo.sh). Standardní Victron
 | `com.victronenergy.grid.cgwacs_ttyUSB0_mb1/Ac/L1..L3/Power` | výkon ze/do sítě, po fázích |
 | `com.victronenergy.pvinverter.pv_44_2366585/Ac/L1..L3/Power` | výkon Fronia, po fázích |
 | `com.victronenergy.pvinverter.pv_44_2366585/Ac/Power` | výkon Fronia celkem |
+
+## BMS je Seplos, ne "SHEnergy" — přímá konfigurace přes výrobcův software
+
+Fyzický BMS hardware je **Seplos** (nejspíš V2 nebo V3 generace, ověřit podle štítku) — "SHEnergy" v D-Bus datech je jen jméno, kterým se Seplos hlásí po nahrání Victron-CAN protokolu, ne skutečný výrobce.
+
+**Oficiální konfigurační software** (RS485 připojení k PC, jiný port než CAN do Cerba):
+- **Battery Manager** (Seplos V2 BMS) nebo **BMS Studio** (Seplos V3 BMS) — ke stažení na [seplos.com/download.html](https://www.seplos.com/download.html)
+- Návod: [BMS 3.0 Operation Instruction of Upper Computer](https://www.seplos.com/bms-3.0-operation-instruction-of-upper-computer.html)
+
+**Přímo relevantní komunitní vlákna** k chování nabíjecího proudu, které jsme pozorovali (rampování, časté omezování):
+- [Seplos Reducing Current Toward Full Charge — DIY Solar Power Forum](https://diysolarforum.com/threads/seplos-reducing-current-toward-full-charge.83366/)
+- [Seplos BMS v2 Charging Current Restricted to 100A — DIY Solar Power Forum](https://diysolarforum.com/threads/seplos-bms-v2-charging-current-restricted-to-100a.73263/)
+- [Seplos V3 BMS charger/balancer help — DIY Solar Power Forum](https://diysolarforum.com/threads/seplos-v3-bms-charger-balancer-help.102569/)
+
+**Doporučený přístup**: vnější řízení přes Victron (DVCC teď, Node-RED později) zůstává primární bezpečnostní vrstva — je ověřené funkční (viz [fronius/README.md](../fronius/README.md)) a nezávisí na tom, jestli je interní logika BMS dobře nastavená. Přímé ladění v Seplos software je hodnotný doplněk (a výše uvedená vlákna vypadají přímo relevantní k našemu problému), ale nejdřív software jen stáhnout a prozkoumat offline, než cokoliv měnit na živém systému — riziko špatně pochopeného zásahu do vnitřních ochranných prahů je vyšší než u vnějšího omezení proudu.
 
 ## Ověření, že je čtení bezpečné (GetValue vs. SetValue)
 

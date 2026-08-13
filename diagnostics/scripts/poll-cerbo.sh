@@ -8,8 +8,11 @@
 # the process exists only for the duration of that one SSH call).
 #
 # BATTERY VALUES: read via a single GetValue on the battery service's
-# root path "/" — the SHEnergy CAN-SMARTBMS-BAT (driver: can-bus-bms)
-# on this system exports its entire state as one nested dict this way.
+# root path "/". The physical BMS is Seplos (V2 or V3, check the label) —
+# it reports itself over D-Bus as "SHEnergy" / CAN-SMARTBMS-BAT because
+# that's the manufacturer string baked into the Victron-CAN-protocol
+# firmware Seplos units use, not the real brand. Venus OS driver:
+# can-bus-bms. This service exports its entire state as one nested dict.
 # Individual per-path queries (e.g. .../Alarms/LowVoltage GetValue)
 # returned empty for the Alarms/* fields on this driver even though
 # they're genuinely present (all 0/OK) in the root dump — this driver
