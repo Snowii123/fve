@@ -99,6 +99,21 @@ Fyzický BMS hardware je **Seplos** (nejspíš V2 nebo V3 generace, ověřit pod
 
 **Doporučený přístup**: vnější řízení přes Victron (DVCC teď, Node-RED později) zůstává primární bezpečnostní vrstva — je ověřené funkční (viz [fronius/README.md](../fronius/README.md)) a nezávisí na tom, jestli je interní logika BMS dobře nastavená. Přímé ladění v Seplos software je hodnotný doplněk (a výše uvedená vlákna vypadají přímo relevantní k našemu problému), ale nejdřív software jen stáhnout a prozkoumat offline, než cokoliv měnit na živém systému — riziko špatně pochopeného zásahu do vnitřních ochranných prahů je vyšší než u vnějšího omezení proudu.
 
+### Co konkrétně umí BatteryMonitor (přečten oficiální manuál, 13.8.2026)
+
+Zdroj: [SEPLOS BatteryMonitor User Manual](https://www.quadprofi.cz/navod/SeplosBattery-Monitor.pdf) (platí pro PUSUNG/PUSUNG-R/PUSUNG-S/MASON řady a SEPLOS 24V/48V Smart BMS — potvrdit podle štítku, jestli sedí i na naši jednotku, jinak platí BMS Studio pro V3).
+
+- **Individual cell voltage display area** — živě zobrazuje napětí **každého článku zvlášť**, plus max/min a rozdíl.
+- **Real Time Record** — appka na PC nahrává stav baterie živě (napětí článků, varování, proud), export do Excelu.
+- **History Record** — **BMS si sám průběžně ukládá historii až 500 záznamů**, pokaždé když se změní stav baterie — appka je umí stáhnout (`Get all`) a uložit do Excelu. Citace z manuálu: *"If a battery failed, this is an important reference for after-sales personnel to judge the cause of the failure."* — přesně nástroj na zjištění, jestli je to opakovaně stejný článek.
+- Připojení: **RS485** (jiný port než CAN do Cerba, potřeba USB-RS485 adaptér). Login appky: `admin` / `admin`.
+
+**Dvě zásadní zjištění z manuálu, která se přímo pojí k dnešnímu/celému vyšetřování:**
+
+1. **10 A není náhoda — je to vestavěná hodnota přímo v Seplos BMS.** Minimálně 5 různých ochranných funkcí v manuálu explicitně používá **10 A** jako automatický bezpečný fallback proud: *Cell high voltage warning* ("BMS would ask the inverter for a Maximum of 10A charging current"), *Pack high voltage warning* (totéž), *Charging high temperature warning* (totéž), *Active charging current limiting* (limituje na 10 A), *Passive charging current limiting* (limituje na 10 A). Dnešní empiricky odvozené doporučení (10 A, viz [fronius/README.md](../fronius/README.md)) se přesně shoduje s tím, co si BMS sám navrhuje jako bezpečný fallback.
+2. **Vysvětlení 96% capu z úplného začátku vyšetřování.** Manuál popisuje nativní funkci **"Intermittent power supply function"**: *"When the SOC reaches 100%, if the SOC exceeds the setting value (which is **96%**), the charging MOSFET will be cut off."* — to je zabudovaná funkce přímo v BMS, ne (jen) Node-RED automatizace, jak se předpokládalo v [incident-dvcc-shutdown.md](../docs/incident-dvcc-shutdown.md). Stojí za ověření v appce, jestli je tahle funkce pořád zapnutá a s jakým prahem.
+3. **Bonus**: manuál zmiňuje i **"Charging equalization function" přímo v BMS** ("When at the charging status, if the cell voltage is higher than setting value, and the voltage difference value exceeds the setting value, the BMS charging equalization function will activated") — nezávislou na Enerkey balanceru. Stojí za zjištění, jestli je zapnutá a jak nastavená, protože by mohla fungovat souběžně s Enerkey (nebo se s ním prát).
+
 ## Ověření, že je čtení bezpečné (GetValue vs. SetValue)
 
 `dbus -y <service> <path> GetValue` je zdokumentovaný oficiální způsob čtení (Venus OS command line manual, `victronenergy/velib_python` na GitHubu). Zápis vyžaduje jinou, argumentovou metodu (`SetValue <hodnota>`), která se nikde v tomto repozitáři nepoužívá. Zdroje:

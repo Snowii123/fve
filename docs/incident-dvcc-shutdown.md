@@ -3,6 +3,7 @@
 ## Chronologie
 
 1. **Dlouhodobý stav před incidentem** — Node-RED automatizace bránila nabití baterie nad **96 % SOC**, jako ochrana podkapacitního packu. Automatizace běžela v tomto režimu cca **půl roku**.
+   - **Aktualizace (13.8.2026, z oficiálního Seplos manuálu)**: BMS (Seplos, viz [dbus-paths.md](../diagnostics/dbus-paths.md)) má **nativní funkci "Intermittent power supply function"**, která přesně tohle dělá zabudovaně: *"When the SOC reaches 100%, if the SOC exceeds the setting value (which is 96%), the charging MOSFET will be cut off."* Není jasné, jestli 96% cap způsobovala jen Node-RED automatizace, jen tahle nativní funkce BMS, nebo obě redundantně — stojí za ověření v appce BatteryMonitor, jestli je tahle funkce zapnutá a s jakým prahem.
 2. **Důsledek** — SOC kalibrace za tu dobu zdriftovala: baterie ukazovala **77 %**, ale reálně už nešla dál **vybít** (skutečný stav packu neodpovídal zobrazenému SOC — reálná využitelná kapacita byla nižší, než 77 % naznačovalo).
 3. Uživatel automatizaci **vypnul** a nechal baterii ručně dobít na **100 %**.
 4. Baterie při tom **chvíli přestala brát proud**; po chvíli se nabíjení znovu rozjelo.
