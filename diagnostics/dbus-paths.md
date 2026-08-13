@@ -27,9 +27,31 @@ Pozn.: v seznamu je jen jedna battery service (`can1`), ne dvě — takže inter
 | `com.victronenergy.battery.socketcan_can1/Info/DischargeCurrentLimit` | DCL — aktuální limit vybíjecího proudu hlášený BMS |
 | `com.victronenergy.battery.socketcan_can1/Soc` | SOC hlášený BMS (jen pro log/kontext, ne pro řízení — viz [soc-calibration.md](../docs/soc-calibration.md)) |
 | `com.victronenergy.battery.socketcan_can1/Dc/0/Current` | okamžitý DC proud baterie |
-| `com.victronenergy.settings/Settings/SystemSetup/MaxChargeCurrent` (orientačně) | zápisový bod pro omezení max. nabíjecího proudu přes DVCC — přesnou cestu ještě ověřit |
+| `com.victronenergy.settings/Settings/SystemSetup/MaxChargeCurrent` | zápisový bod pro omezení max. nabíjecího proudu přes DVCC — **potvrzeno**, viz níže |
 
-Pro zápis limitu nabíjecího proudu je nutné potvrdit, jestli jde přes obecné DVCC nastavení, nebo přes ESS-specifické `CGwacs/...` cesty.
+## Cesty pro zápis (potvrzeno z exportu Node-RED flow, viz [`automation/current-node-red-flow.md`](../automation/current-node-red-flow.md))
+
+Node-RED addon (`node-red-contrib-victron`) adresuje services přes `service/instance-číslo` (např. `com.victronenergy.battery/512`), ne přes syrové D-Bus jméno jako `dbus-spy` výše (`com.victronenergy.battery.socketcan_can1`) — pravděpodobně stejný fyzický systém, jen jinak adresovaný. Node/instance čísla zjištěná z exportovaného flow:
+
+| Service (Node-RED instance) | Odpovídá (dbus-spy) | Poznámka |
+|---|---|---|
+| `com.victronenergy.battery/512` | `com.victronenergy.battery.socketcan_can1` (nejisté, k ověření) | SOC |
+| `com.victronenergy.pvinverter/20` | `com.victronenergy.pvinverter.pv_44_2366585` | Fronius |
+| `com.victronenergy.grid/30` | `com.victronenergy.grid.cgwacs_ttyUSB0_mb1` | grid meter |
+| `com.victronenergy.vebus/276` | `com.victronenergy.vebus.ttyS4` | MultiPlus-II cluster |
+| `com.victronenergy.system/0` | `com.victronenergy.system` | agregáty, spotřeba po fázích, relé |
+
+Zápisové cesty použité aktuální automatizací:
+
+| Cesta | Zápis | Účel |
+|---|---|---|
+| `com.victronenergy.settings/Settings/SystemSetup/MaxChargeCurrent` | float | DVCC limit nabíjecího proudu — obecné DVCC nastavení, ne ESS-specifické |
+| `com.victronenergy.settings/Settings/CGwacs/AcPowerSetPoint` | integer (W) | ESS grid set-point (export/import cíl) |
+| `com.victronenergy.settings/Settings/CGwacs/MaxFeedInPower` | integer (W) | strop pro export do sítě (`-1` = neomezeno, `>= 0` = limit) |
+| `com.victronenergy.settings/Settings/CGwacs/BatteryLife/State` | enum (1–12) | ESS BatteryLife/optimized mode stav, včetně „Keep batteries charged" (9) |
+| `com.victronenergy.vebus/276/Mode` | enum (1 Charger Only, 2 Inverter Only, 3 On, 4 Off) | přepínání on/off-grid — `2`/`3` používá aktuální automatizace |
+
+Tohle zodpovídá dřívější otevřenou otázku, jestli zápis limitu nabíjecího proudu jde přes obecné DVCC nastavení nebo ESS-specifické `CGwacs/...` — jde přes DVCC (`SystemSetup/MaxChargeCurrent`), `CGwacs/...` se používá pro ESS grid set-point/feed-in/BatteryLife zvlášť.
 
 ## Grid a PV (Fronius) — přímo přes reálné services
 

@@ -24,6 +24,7 @@ Diagnostika DVCC shutdownu po pokusu o kalibraci SOC, nevybalancovaný pack, dop
 - [`docs/incident-dvcc-shutdown.md`](docs/incident-dvcc-shutdown.md) — chronologie incidentu: SOC drift → pokus o kalibraci → pád Victronu do OFF
 - [`docs/soc-calibration.md`](docs/soc-calibration.md) — jak funguje SOC kalibrace u CAN-bus managed baterie, pojem tail current, proč nejde kalibrovat nevybalancovaný pack
 - [`docs/rebalancing-procedure.md`](docs/rebalancing-procedure.md) — doporučený postup bezpečného rebalance a kalibrace horní/dolní meze
+- [`automation/current-node-red-flow.md`](automation/current-node-red-flow.md) — rozbor Node-RED automatizace, která na systému aktuálně běží (SOC-only řízení DVCC, prodej do sítě, on/off-grid přepínání) — nalezené chyby a doporučená vylepšení
 - [`automation/node-red-control-logic.md`](automation/node-red-control-logic.md) — návrh trvalé closed-loop automatizace v Node-RED na Cerbu, řízené podle napětí článků místo SOC
 - [`diagnostics/dbus-paths.md`](diagnostics/dbus-paths.md) — přehled D-Bus cest potřebných pro diagnostiku a automatizaci
 - [`diagnostics/checklist.md`](diagnostics/checklist.md) — otevřené položky k ověření na systému, včetně průběžných měření cell voltage spread

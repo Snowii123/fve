@@ -73,4 +73,4 @@ Přesně tahle situace ([incident-dvcc-shutdown.md](../docs/incident-dvcc-shutdo
 
 - **Viditelnost** — dashboard tile se spreadem a jeho trendem, ne jen skrytá logika na pozadí.
 - **Alerting** — pokud spread neklesá po rozumnou dobu (např. 2 týdny) navzdory běžící logice, poslat notifikaci (Telegram/Pushover/e-mail z Node-RED) — signál, že balancer nestíhá nebo má vadný kanál.
-- Tahle automatizace by měla **nahradit** starou 96% cap logiku, ne běžet vedle ní — souběh dvou nekoordinovaných automatizací byl pravděpodobně součást původního problému.
+- Tahle automatizace by měla **nahradit** starou 96% cap logiku, ne běžet vedle ní — souběh dvou nekoordinovaných automatizací byl pravděpodobně součást původního problému. Rozbor toho, co stará logika konkrétně dělá (a proč nikdy nesledovala napětí článků), viz [current-node-red-flow.md](current-node-red-flow.md).
