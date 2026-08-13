@@ -98,6 +98,29 @@ Zdánlivý rozpor mezi Enerkey appkou (téměř dokonalý balanc), `Multi` obraz
 1. **Rozsah**: Enerkey appka (Horní/Dolní) vidí jen **svůj vlastní string** (16 článků) — nemůže zachytit rozdíl MEZI stringy. `Multi` obrazovka a log vidí **celý pack** (oba stringy), takže když je rozjezd hlavně mezi stringy, projeví se jen tam.
 2. **Rychlost vzorkování** — důležitější důvod. Rozjezd uměl kolísat ze stovek mV na jednotky mV během jediné minuty (viz tabulka výše). Appky se obnovují jen občas (Bluetooth), člověk se na `Multi` obrazovku podívá v jednom okamžiku — `poll-cerbo.sh` vzorkuje ~1×/s, takže je to jediný zdroj, který stíhá zachytit rychlé výkyvy. Rozdílná čísla ve třech zdrojích tak často znamenají "díváme se na jiný okamžik", ne že by některý zdroj lhal.
 
+### SOC=100 % byl falešný — pack nebyl skutečně plný (13.8.2026, 15:16-15:18 UTC)
+
+Krátce po stabilizaci (viz výše) se SOC ustálil na 100 % a systém přestal nabíjet, přešel na vybíjení. Detailní pohled na přechod ale ukazuje, že to nebylo skutečné naplnění:
+
+| Veličina | Hodnota v okamžiku přechodu | Cíl (`Info/MaxChargeVoltage`) |
+|---|---|---|
+| Celková voltáž packu | 53,3–53,6 V | **57,0 V** |
+| SOC | 100,0 % (konstantně) | — |
+| Nejvyšší článek (opakovaně) | skoky na 3,574 / 3,662 / 3,678 / 3,646 / 3,669 V | 3,5625 V |
+| Nejnižší článek (souběžně se skoky) | propady na 3,075 / 2,947 / 2,817 V | — |
+
+**Celková voltáž packu byla o 3,5–3,7 V (≈0,22–0,23 V/článek) níž, než skutečný cíl** — pack jako celek zdaleka nebyl doopravdy plný. Jeden vychýlený článek opakovaně vystřeloval nad strop, zatímco jiný (nebo ten samý, chybně měřený) padal hluboko dolů — přesně ta imbalance, co řešíme celý den. Tyhle výkyvy opakovaně spouštěly `alarm_charge_blocked`/`alarm_high_cell_voltage`, BMS odmítal další proud kvůli tomu jednomu článku, ne proto, že by byl pack skutečně plný. **SOC=100 % je tedy skoro jistě falešné** — ESS/DVCC to vyhodnotilo jako "baterie plná" a přepnulo na běžný self-consumption provoz, ale reálná využitelná kapacita zůstala nevyužitá.
+
+### Proč se pak baterie vybíjí i s aktivním 10A limitem nabíjení
+
+Zdánlivě nelogické — SOC 98 %, limit nabíjecího proudu 10 A, a přesto proud teče ven z baterie. Vysvětlení: **10A limit je strop, ne příkaz "nabíjej"**. Řídí, jak rychle smí nabíjení probíhat, *pokud* existuje přebytek výkonu k nabíjení. Ověřeno v datech (15:40 UTC): PV výkon klesl z odpoledních ~4,1 kW na **~2,38 kW** (blížící se večer), grid je vyrovnaný (dovoz/vývoz blízko nuly) — takže rozdíl mezi PV a spotřebou domu jde z baterie. To je normální self-consumption chování ESS módu "Optimized without BatteryLife", nemá to nic společného s nastaveným limitem nabíjecího proudu — ten by se uplatnil, jen kdyby byl přebytek PV a systém se snažil nabíjet.
+
+### Řešení — krátkodobě i dlouhodobě
+
+- **Krátkodobě, příště až bude přebytek PV**: pokračovat v postupu, co dnes fungoval — 10 A limit, sledovat `max_cell_v` a hlavně rozjezd, a hlídat konkrétně diagnostikovaný vzorec (jeden článek vystřelí nad 3,56 V a spustí `alarm_charge_blocked`, i když je zbytek packu hluboko pod cílem). Balancer dnes prokázal, že to umí dohnat (2 mV stabilita) — potřebuje čas a klid, ne rychlé nabíjení.
+- **Dlouhodobě**: implementovat [node-red-control-logic.md](../automation/node-red-control-logic.md) s dnes potvrzenými reálnými čísly (3,5625 V strop, 10 A funkční hranice) místo odhadů — externí smyčka řízená podle `MaxCellVoltage` by proud zpomalila plynule, dřív, než vychýlený článek stihne vystřelit a BMS ho tvrdě zablokuje.
+- **Stojí za ověření**: pokud se stejný extrémní vzorec (jeden článek nahoru, jiný dolů) opakuje na stejném konkrétním článku, může jít o fyzicky problémový článek/spoj, ne jen o balanc — ověřit přes Seplos software (viz [dbus-paths.md](../diagnostics/dbus-paths.md#bms-je-seplos-ne-shenergy--přímá-konfigurace-přes-výrobcův-software)), pokud ukazuje historii per-článek.
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
