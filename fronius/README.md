@@ -47,24 +47,36 @@ Zpětná analýza celého logu (přes 750 kB, stovky vzorků) odhalila ještě j
 
 **Klíčové zjištění**: mezi prvním varováním a skutečným odříznutím proudu uplynuly **~2 sekundy**, během kterých CCL ještě stihlo vzrůst. Spoléhat na to, že automatika zareaguje včas, je riskantní — proto potřebujeme vnější limit, který nečeká na alarm, ale brzdí dřív.
 
-**Souhrn z celého logu** (bucketováno podle proudu):
+### Oprava (13.8.2026, pozdější důkladná analýza): situace je vážnější, než ukazoval první výřez
+
+Předchozí verze tohoto dokumentu vycházela jen z namátkových výřezů logu a podcenila to. Systematický průchod **celým** logem (14:07–14:50 UTC, 2986 vzorků) našel **~35 samostatných alarm epizod za 42 minut** — ne pár ojedinělých výkyvů, ale prakticky nepřetržitý cyklus: nabíjení rampuje → alarm → BMS zablokuje nabíjení → zotavení → znovu od začátku.
+
+**Nejdůležitější přehlédnutý signál**: `alarm_charge_blocked` je přítomný ve **drtivé většině** epizod — častěji a konzistentněji než `alarm_high_cell_voltage` nebo `alarm_cell_imbalance`, na které se dřívější verze soustředila.
+
+**Rozsah přes celý log**:
+- `max_cell_v` v epizodách: opakovaně 3,6–3,87 V (peak 3,867 V ve 14:15, téměř stejně zlé 3,866 V ve 14:34 — dvě téměř identicky vážné epizody, ne jedna výjimka)
+- `min_cell_v`: **opakovaně padá do pásma 2,77–3,0 V** — blízko potvrzené bezpečné dolní hranice (2,9 V/článek), a děje se to **při nabíjení**, ne vybíjení
+- CCL se ve většině epizod dostane až na **188–190 A** (skoro celý povolený strop 190 A) — automatika ho tam pouští znovu a znovu, pokaždé se to zablokuje
+
+**Souhrn podle proudu** (bucketováno přes celý log):
 
 | Proud (CCL/skutečný) | Pozorované chování |
 |---|---|
-| 40–90 A | mírné excurze (max ~3,6–3,74 V), jedna alarm (HighCellVoltage), rychlé zotavení |
-| 100–190 A | vážné excurze (max 3,8–3,87 V), **obě** alarmy současně, pomalejší zotavení |
-| i 50–80 A mělo krátké klidné úseky (rozjezd <30 mV) | vztah proud→problém není čistě lineární — jde spíš o kumulativní efekt pokračujícího rampování CCL v čase, ne o jednu pevnou proudovou hranici |
+| 40–90 A | mírné excurze (max ~3,6–3,74 V), jedna alarm, rychlé zotavení — ale i tohle vedlo k alarmům **opakovaně**, ne jen výjimečně |
+| 100–190 A | vážné excurze (max 3,8–3,87 V), **obě/více** alarmy současně (`HighCellVoltage`, `CellImbalance`, `ChargeBlocked`), pomalejší zotavení |
+| i 50–80 A mělo krátké klidné úseky (rozjezd <30 mV) | vztah proud→problém není čistě lineární, ale i "klidné" proudové pásmo vedlo k alarmům desítkykrát za odpoledne |
 
-### Provizorní bezpečnostní tabulka (k okamžitému ručnímu použití)
+### Provizorní bezpečnostní tabulka — REVIDOVÁNO, konzervativnější
 
-Než bude existovat automatizace, tohle je doporučený postup pro ruční sledování a omezování nabíjecího proudu podle live dat z [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) nebo appek:
+Vzhledem k frekvenci a závažnosti zjištěné při plné analýze je doporučený strop výrazně nižší, než naznačovala první verze:
 
 | Sledovaná hodnota | Doporučený max. nabíjecí proud | Zdůvodnění |
 |---|---|---|
-| `max_cell_v` < 3,40 V **a** rozjezd < 50 mV | normální provoz | daleko od pozorovaných problémů |
-| `max_cell_v` 3,40–3,50 V **nebo** rozjezd 50–100 mV | ~40 A | hranice, kde rozjezd v datech začíná růst |
-| `max_cell_v` 3,50–3,60 V **nebo** rozjezd 100–200 mV **nebo** CCL už samo přes ~90 A | ~15–20 A | přesně tady začaly mírné excurze (3,6–3,74 V, 1 alarm) |
-| `max_cell_v` ≥ 3,60 V **nebo** rozjezd > 200 mV **nebo** `alarm_high_cell_voltage` = 1 | **0 A (STOP)**, počkat na návrat pod ~3,45 V | tady došlo k vážným excurzím (3,8–3,87 V, obě alarmy) a ke zpoždění automatiky |
+| `max_cell_v` < 3,30 V **a** rozjezd < 30 mV, žádné alarmy dlouhodobě | ~10–15 A (ne víc, dokud nebude víc dat o klidném dlouhodobém provozu) | konzervativní — i "klidná" pásma proudu v logu vedla opakovaně k alarmům |
+| `max_cell_v` 3,30–3,45 V **nebo** rozjezd 30–100 mV | ~10 A | doporučená okamžitá hodnota pro VRM konzoli (13.8.2026) — viz zdůvodnění níže |
+| `max_cell_v` ≥ 3,45 V **nebo** rozjezd > 100 mV **nebo** jakýkoliv alarm (`alarm_charge_blocked`, `alarm_high_cell_voltage`, `alarm_cell_imbalance`) | **0 A (STOP)** | i tady může BMS sám zablokovat nabíjení — nečekat na to, zastavit dřív |
+
+**Doporučená okamžitá hodnota v VRM konzoli: 10 A.** Zdůvodnění: i CCL v pásmu 40-90 A vedlo v logu opakovaně k alarmům, takže 40 A (dřívější doporučení) nedává dost rezervy. 10 A dává balanceru (max 4 A/jednotka) reálnou šanci rozjezd stíhat, místo aby ho proud pořád předháněl. Pokud se i při 10 A objeví `alarm_charge_blocked` nebo rozjezd nad ~100 mV, jít na 0 A a řešit to jinak (fyzická kontrola konkrétního slabého článku, ne jen software).
 
 Tahle tabulka je odvozená z jedné odpolední session (13.8.2026), ne z dlouhodobých dat — brát jako pracovní výchozí bod, ne finální kalibraci. **Nečekat na další pád do OFF, aby se "zjistilo, co se stane"** — máme už teď dost dat na to, abychom jednali proaktivně.
 
