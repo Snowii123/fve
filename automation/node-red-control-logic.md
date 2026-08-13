@@ -40,40 +40,41 @@ Dnes (13.8.2026) zachyceno živě: `alarm_high_cell_voltage` naskočil, CCL ale 
 1. **Smyčka musí běžet výrazně rychleji než dřív navrhovaných 30-60 s** — reálně blízko 1 s, jinak automatizace nestihne zareagovat dřív, než to udělá (pomalu a nedokonale) samotné BMS. `poll-cerbo.sh` běžící přes SSH dokázal cyklus ~0,7-0,9 s — nativní Node-RED flow přímo na Cerbu (bez SSH round-tripu) by měl být rychlejší.
 2. **Nejrychlejší dostupný signál nejsou přepočty z `MaxCellVoltage`, ale přímo `Alarms/*` pole z BMS** — pokud BMS sám hlásí `ChargeBlocked`/`HighCellVoltage`/`CellImbalance` = 1, automatizace by na to měla reagovat okamžitě (snížit proud na bezpečnou hodnotu), ne čekat, až si to sama dopočítá z napětí. `MaxCellVoltage`-based logika zůstává jako **preventivní** vrstva (zpomalit dřív, než se k alarmu vůbec dostane), `Alarms/*` je **reaktivní** rychlá pojistka.
 
-## Řídicí logika (state machine) — revidováno
+## Řídicí logika — spojitý (proporcionální) regulátor, ne diskrétní stupně
 
-Smyčka běží **~1 s** během nabíjení blízko vrcholu (ne 30-60 s jako v dřívější verzi):
+**Zásadní revize (13.8.2026), motivovaná živým pozorováním cyklické nestability.** Živý test (13.8.2026, 16:41-16:51 UTC — viz [fronius/README.md](../fronius/README.md#otestováno-živě-1382026-1641164451-utc--feed-in-vypnutý-jen-částečně-pomohlo)) ukázal, že i s vypnutým feed-inem a nastaveným 10A stropem ve VRM se pack chová v pravidelném cyklu: ~4 min klid (proud se drží u 10 A, rozjezd 2-3 mV) → ~3 min chaos (proud uteče na 30+ A, rozjezd stovky mV, alarmy) → opakovat. **Statické jednorázově nastavené číslo (ani binární 0/10 A přepínání) tenhle cyklus samo nezastaví** — mezi kontrolami proud zase pomalu leze nahoru, dokud znovu nenarazí na vychýlený článek.
+
+**Cíl není jen "nezpůsobit alarm"**, ale dostat pack co nejblíž k `V_ceiling` (57 V / 3,5625 V) **a přitom zůstat vybalancovaný** — tedy nabíjení musí pokračovat skoro pořád, jen bezpečnou rychlostí, ne se úplně zastavovat pokaždé, když se něco přiblíží k prahu. Diskrétní stupně (0 A / 10 A) tohle neumí — buď jedou naplno, nebo úplně stojí. Proto nahrazeno spojitou funkcí, přepočítávanou a **zapisovanou znovu každý cyklus** (~1 s), ne jen při změně stavu:
 
 ```
-# Vrstva 1 (nejrychlejší, reaktivní): vlastní alarmy BMS
-if Alarms.ChargeBlocked or Alarms.HighCellVoltage or Alarms.CellImbalance:
-    MaxChargeCurrent = 0   # okamžitě, nečekat na vlastní výpočet
+margin_v = V_ceiling - MaxCellVoltage        # kolik ještě zbývá do stropu
+I_allowed = I_max * clamp(margin_v / safety_band, 0, 1)   # plynulý pokles k nule s blížícím se stropem
+
+if spread > spread_trigger:
+    I_allowed = min(I_allowed, 5)             # rozjezd je druhá, nezávislá brzda
+
+if any Alarms.* == 1:
+    I_allowed = 1                             # okamžitý tvrdý zásah, nečekat na BMS vlastní odezvu (~2s lag)
     ALERT (log + notifikace)
-    # pokračovat dál až alarmy zmizí A MaxCellVoltage klesne pod V_bal - margin
 
-# Vrstva 2 (preventivní): napětí a rozjezd, viz tabulka ve fronius/README.md
-elif MaxCellVoltage < V_bal:
-    normální nabíjecí proud (běžný ESS/DVCC režim)
-
-elif spread > spread_trigger:
-    MaxChargeCurrent = 10   # ověřená bezpečná hodnota, viz níže
-    # rozjezd je nezávislý spouštěč na zpomalení, i když napětí samo o sobě OK
-
-elif V_bal <= MaxCellVoltage < V_ceiling - margin:
-    MaxChargeCurrent = 10   # ověřená bezpečná hodnota
-
-elif MaxCellVoltage >= V_ceiling - margin:
-    MaxChargeCurrent = 0
-    # počkat na relaxaci; ALERT pokud trvá > X minut bez zlepšení
+write MaxChargeCurrent = I_allowed            # zapsat KAŽDÝ cyklus, ne jen při změně — viz "Kam zapisovat" níže
 ```
 
-**Proč 10 A**: empiricky ověřeno 13.8.2026 (viz [fronius/README.md](../fronius/README.md#výsledek-10-a-zafungovalo-1382026-1506-utc) — 2mV stabilita, žádné alarmy po dobu 6+ minut, zopakováno i po přepnutí na "Keep batteries charged"). Navíc se shoduje s tím, co **Seplos BMS sám používá jako vestavěný fallback** minimálně v 5 různých ochranných funkcích (cell/pack high voltage warning, charging high temp warning, active/passive current limiting) — viz [dbus-paths.md](../diagnostics/dbus-paths.md#co-konkrétně-umí-batterymonitor-přečten-oficiální-manuál-1382026). Přesná hodnota `margin` pod `V_ceiling` zatím neurčena — návrh vyžaduje delší pozorování než jedno odpoledne.
+- `I_max` = 10 A (viz zdůvodnění níže), `safety_band` zatím neurčený (návrh, ne ověřená hodnota — orientačně ~0,1-0,15 V, potřeba doladit pozorováním).
+- Proud tímhle nikdy neklesne na "tvrdou nulu" kromě skutečného alarmu — vždycky teče aspoň něco, takže pack **pořád postupuje k cíli**, jen se plynule zpomaluje/zrychluje podle toho, jak blízko je nejhorší článek.
+- Na rozdíl od dnešního pozorovaného cyklu (plný proud → alarm → tvrdé 0 → zotavení → znovu plný proud, ~7min perioda) by se proud měl brzdit **dřív a plynuleji**, takže by amplituda cyklu měla být menší, ideálně by cyklus úplně zmizel.
 
-Řídicí proměnná pro nouzové brzdění = `Alarms/*` (nejrychlejší). Řídicí proměnná pro preventivní zpomalení = `MaxCellVoltage` a `spread`.
+**Proč 10 A jako `I_max`**: empiricky ověřeno 13.8.2026 (viz [fronius/README.md](../fronius/README.md#výsledek-10-a-zafungovalo-1382026-1506-utc) — 2mV stabilita, žádné alarmy po dobu 6+ minut). Shoduje se i s tím, co **Seplos BMS sám používá jako vestavěný fallback** minimálně v 5 různých ochranných funkcích — viz [dbus-paths.md](../diagnostics/dbus-paths.md#co-konkrétně-umí-batterymonitor-přečten-oficiální-manuál-1382026).
+
+Řídicí proměnná pro nouzové brzdění = `Alarms/*` (nejrychlejší, okamžitý zásah). Řídicí proměnná pro plynulé řízení = `MaxCellVoltage` (spojitě) a `spread` (jako druhá nezávislá brzda).
 
 ## Kam zapisovat
 
-Přes Node-RED (dbus-listener/dbus-out node nebo MQTT do Venus broker) zapisovat do DVCC nastavení max. nabíjecího proudu — přesná cesta (typicky pod `com.victronenergy.settings/Settings/SystemSetup/...` nebo ESS `CGwacs/...`) je nutné ověřit přes dbus-spy. Zapisovat **jen při změně stavu**, ne v každém cyklu.
+Přes Node-RED (dbus-listener/dbus-out node nebo MQTT do Venus broker) zapisovat do DVCC nastavení max. nabíjecího proudu — přesná cesta (typicky pod `com.victronenergy.settings/Settings/SystemSetup/...` nebo ESS `CGwacs/...`) je nutné ověřit přes dbus-spy. **Zapisovat každý cyklus (~1 s), ne jen při změně** — to je zásadní rozdíl oproti dřívější verzi tohohle návrhu a přímý důsledek dnešního zjištění, že jednou nastavená hodnota se sama od sebe "rozjíždí" (proud postupně roste, i když se VRM hodnota nezměnila).
+
+⚠️ **Dva otevřené, neověřené body, nutné vyřešit před implementací:**
+1. Přesná D-Bus **zápisová** cesta pro limit proudu není potvrzená (na rozdíl od čtecí `Info/MaxChargeCurrent`, což je jen hlášení z BMS, ne řídicí vstup) — zjistit přes dbus-spy.
+2. **Riziko, že i tenhle zápis bude DVCC ignorovat, dokud je zapnutý feed-in** — oficiální Victron manuál popisuje přesně tohle chování (viz níže). Živý test 13.8.2026 (feed-in vypnutý) ukázal jen částečné zlepšení, ne úplné vyřešení, takže samotné psaní do stejné DVCC hodnoty možná nebude stačit ani s automatizací. Je potřeba to ověřit přímým testem: zapsat hodnotu a sledovat, jestli se `dc_current_a` fakt drží pod ní i při zapnutém feed-inu. Pokud ne, může být nutné jako záložní krajní řešení automatizovat i dočasné vypnutí/omezení feed-inu při alarmu (v podstatě zautomatizovat to, co uživatel dnes udělal ručně, ale rychleji a cíleněji).
 
 ### Oprava: proudový limit se neprojevuje spolehlivě — není to (jen) "Fronius problém"
 
