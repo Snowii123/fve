@@ -108,6 +108,12 @@ def bkey(k):
     v = battery_root.get(k)
     if v is None or v == []:
         return ""
+    # dbus.Byte (used for the Alarms/* 0/1/2 flags on this driver) prints
+    # as an invisible control character via str() instead of its numeric
+    # value — found by ../scripts/debug_alarms.sh on 13.8.2026. Cast
+    # through int() to get "0"/"1"/"2" instead of a blank field.
+    if isinstance(v, dbus.Byte):
+        return str(int(v))
     return str(v)
 
 battery_fields = [
