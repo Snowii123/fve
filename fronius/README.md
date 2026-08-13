@@ -35,6 +35,39 @@ Tohle mění interpretaci zásadně. **Tahle epizoda nebyla vyvolaná kolísán�
 
 Tohle silně posiluje případ pro `V_buffer_ceiling` řízený napětím (viz níže) — potřebujeme **externí tvrdý strop s marží pod tím, kde tenhle interní rampovací algoritmus začíná dělat problémy**, protože samotný interní algoritmus zjevně nemá dost rezervy vestavěné ani za ideálních podmínek.
 
+### Druhá, horší událost (14:15 UTC) a co z celého logu vyplývá
+
+Zpětná analýza celého logu (přes 750 kB, stovky vzorků) odhalila ještě jednu, dřívější a **vážnější** epizodu:
+
+- **14:15:05–12** — CCL rampuje 146→160 A (blízko svého povoleného stropu 190 A), proud ~40-50 A, `max_cell_v` roste 3,49→**3,867 V**.
+- **14:15:12** — při 3,867 V naskočí **obě** alarmy současně: `alarm_high_cell_voltage` = 1 **a** `alarm_cell_imbalance` = 1.
+- **14:15:13** — CCL i přesto ještě jednou vzroste (162 A) — automatika nezareagovala okamžitě.
+- **14:15:14** — teprve teď (**~2 s po prvním varování**) CCL spadne na 0 a proud se zastaví.
+- **14:15:15–19** — proud 0, napětí zůstává zvýšené (~3,68–3,685 V), obě alarmy stále aktivní — pomalejší zotavení než u mírnější epizody z 14:24.
+
+**Klíčové zjištění**: mezi prvním varováním a skutečným odříznutím proudu uplynuly **~2 sekundy**, během kterých CCL ještě stihlo vzrůst. Spoléhat na to, že automatika zareaguje včas, je riskantní — proto potřebujeme vnější limit, který nečeká na alarm, ale brzdí dřív.
+
+**Souhrn z celého logu** (bucketováno podle proudu):
+
+| Proud (CCL/skutečný) | Pozorované chování |
+|---|---|
+| 40–90 A | mírné excurze (max ~3,6–3,74 V), jedna alarm (HighCellVoltage), rychlé zotavení |
+| 100–190 A | vážné excurze (max 3,8–3,87 V), **obě** alarmy současně, pomalejší zotavení |
+| i 50–80 A mělo krátké klidné úseky (rozjezd <30 mV) | vztah proud→problém není čistě lineární — jde spíš o kumulativní efekt pokračujícího rampování CCL v čase, ne o jednu pevnou proudovou hranici |
+
+### Provizorní bezpečnostní tabulka (k okamžitému ručnímu použití)
+
+Než bude existovat automatizace, tohle je doporučený postup pro ruční sledování a omezování nabíjecího proudu podle live dat z [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) nebo appek:
+
+| Sledovaná hodnota | Doporučený max. nabíjecí proud | Zdůvodnění |
+|---|---|---|
+| `max_cell_v` < 3,40 V **a** rozjezd < 50 mV | normální provoz | daleko od pozorovaných problémů |
+| `max_cell_v` 3,40–3,50 V **nebo** rozjezd 50–100 mV | ~40 A | hranice, kde rozjezd v datech začíná růst |
+| `max_cell_v` 3,50–3,60 V **nebo** rozjezd 100–200 mV **nebo** CCL už samo přes ~90 A | ~15–20 A | přesně tady začaly mírné excurze (3,6–3,74 V, 1 alarm) |
+| `max_cell_v` ≥ 3,60 V **nebo** rozjezd > 200 mV **nebo** `alarm_high_cell_voltage` = 1 | **0 A (STOP)**, počkat na návrat pod ~3,45 V | tady došlo k vážným excurzím (3,8–3,87 V, obě alarmy) a ke zpoždění automatiky |
+
+Tahle tabulka je odvozená z jedné odpolední session (13.8.2026), ne z dlouhodobých dat — brát jako pracovní výchozí bod, ne finální kalibraci. **Nečekat na další pád do OFF, aby se "zjistilo, co se stane"** — máme už teď dost dat na to, abychom jednali proaktivně.
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
