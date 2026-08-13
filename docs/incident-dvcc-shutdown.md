@@ -10,6 +10,7 @@
 6. Nová informace zjištěná následně — při provozu čistě na baterii (bez dobíjení) se pack vybije **jen do 47 % SOC**, než systém začne brát proud ze sítě.
    - ESS **Minimum SOC = 20 %** — ověřeno uživatelem, **vyloučeno jako příčina** (nevysvětluje odpojení už při 47 %).
    - **Aktuální hypotéza (neověřeno, plánuje se retest):** jev je nejspíš způsobený samostatnou **noční nabíjecí automatizací**, která baterii pravidelně dobíjí zpět na 50 % — tedy pack v praxi nikdy nedostane šanci klesnout níž, protože ho automatizace v noci "podchytí" dřív, ne že by 47 % byl skutečný fyzický limit. Až se tahle automatizace vypne/upraví, plánuje se znovu zkusit, jak nízko lze pack reálně vybít.
+   - **Částečný retest (13.8.2026):** přes noc vybíjení na běžnou zátěž (bez vynucování), přechod na síť **vůbec nenastal**. Nejníž packy klesly na **3,20 V / 3,26 V** (jednotlivé stringy) při SOC ~58 % dle VRM — hluboko v plochém plató LFP křivky, žádný náznak rizika. Ráno bylo dobíjení ručně obnoveno (Fronius), takže test nedošel ke skutečnému dnu — otázka "kde je reálná nula" zůstává otevřená, ale **dolní konec se jeví jako výrazně méně naléhavý problém než horní** (žádný OV-like incident, žádný nucený přechod na síť, komfortní napětí). Priorita zůstává na kalibraci/bezpečnosti horního konce.
 
 ## Hypotéza příčiny (neověřeno přímým měřením — viz [checklist](../diagnostics/checklist.md))
 
