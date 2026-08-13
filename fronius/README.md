@@ -80,6 +80,24 @@ Vzhledem k frekvenci a závažnosti zjištěné při plné analýze je doporuče
 
 Tahle tabulka je odvozená z jedné odpolední session (13.8.2026), ne z dlouhodobých dat — brát jako pracovní výchozí bod, ne finální kalibraci. **Nečekat na další pád do OFF, aby se "zjistilo, co se stane"** — máme už teď dost dat na to, abychom jednali proaktivně.
 
+### Výsledek: 10 A zafungovalo (13.8.2026, 15:06 UTC)
+
+Po ~12 minutách na 10 A limitu došlo k prudké a trvalé stabilizaci:
+
+| Čas (UTC) | Průměrný rozjezd | `alarm_charge_blocked` |
+|---|---|---|
+| 14:52–15:05 | 100–410 mV, kolísavě | často (až 64/70 vzorků za minutu) |
+| **15:06 a dál** | **~2 mV, stabilně** | **0, 6+ minut v kuse** |
+
+10A limit tedy dal balanceru reálnou šanci rozjezd dohnat — doporučení z tabulky výše se potvrdilo v praxi. Nebylo potřeba jít na 0 A.
+
+### Proč appky (Enerkey, n-BMS "Multi") a log občas ukazují jiná čísla
+
+Zdánlivý rozpor mezi Enerkey appkou (téměř dokonalý balanc), `Multi` obrazovkou n-BMS (větší rozptyl) a logem (ještě jiné číslo) má dvě reálné příčiny, ne chybu měření:
+
+1. **Rozsah**: Enerkey appka (Horní/Dolní) vidí jen **svůj vlastní string** (16 článků) — nemůže zachytit rozdíl MEZI stringy. `Multi` obrazovka a log vidí **celý pack** (oba stringy), takže když je rozjezd hlavně mezi stringy, projeví se jen tam.
+2. **Rychlost vzorkování** — důležitější důvod. Rozjezd uměl kolísat ze stovek mV na jednotky mV během jediné minuty (viz tabulka výše). Appky se obnovují jen občas (Bluetooth), člověk se na `Multi` obrazovku podívá v jednom okamžiku — `poll-cerbo.sh` vzorkuje ~1×/s, takže je to jediný zdroj, který stíhá zachytit rychlé výkyvy. Rozdílná čísla ve třech zdrojích tak často znamenají "díváme se na jiný okamžik", ne že by některý zdroj lhal.
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
