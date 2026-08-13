@@ -6,6 +6,35 @@
 
 Předchozí verze tohoto dokumentu tvrdila, že "battery pack bezpečně zvládá jen ~12,5 kW". To byla chyba — **12,5 kWp je aktuálně instalovaný výkon FV panelů** na Froniovi (který má inverter dimenzovaný na 17,5 kW, ale zatím není osazený na plný výkon), ne nějaká vlastnost battery packu. Kolik battery pack reálně bezpečně zvládá, je jiná otázka — zodpovězená níže pomocí dohledaných zdrojů.
 
+## Živě zachycená událost (13.8.2026): nestabilita i za ideálních podmínek
+
+Poprvé se pomocí [`poll-cerbo.sh`](../diagnostics/scripts/poll-cerbo.sh) (interval 0, plné rozlišení) podařilo zachytit reálnou epizodu s napěťovou odezvou — a je to horší zjištění, než jsme čekali.
+
+### Časová osa (14:24:06–14:25:09 UTC = 16:24-16:25 lokálně)
+
+1. **14:24:06–20** — normální nabíjecí rampa: proud roste 17→81 A, CCL se zvedá po krocích (36→76 A), `max_cell_v` s tím roste 3,44→3,68 V.
+2. **14:24:20** — `max_cell_v` = **3,682 V** → `alarm_high_cell_voltage` = **1 (Warning)**. První živě zachycený warning vůbec.
+3. **14:24:23** — napětí kleslo na 3,455 V, warning zmizel.
+4. **14:24:26–31** — napětí roste znovu, CCL dál stoupá (86→96 A), `max_cell_v` = 3,607 V.
+5. **14:24:31→32** — **CCL spadne z 96 na 0, proud spadne z 60 A na 0 A** — reálný ochranný cutoff, přesně ten mechanismus, který jsme dřív jen hypoteticky předpokládali.
+6. **14:24:32–34** — proud 0, pack "odpočívá", napětí drží ~3,60 V.
+7. **14:24:34–52** — CCL se opatrně rampuje zpátky nahoru po **2A krocích** (0→2→4→...→70), proud se postupně vrací.
+8. **14:24:52–55** — další výkyv: `max_cell_v` 3,57→3,68 V, zároveň **`min_cell_v` propadne 3,22→2,82 V** (rozjezd ~850 mV). `alarm_cell_imbalance` = 1, drží až do konce zachyceného okna.
+
+Pozorování z appky (screenshoty ~16:26-27, tedy ~1-2 min PO téhle epizodě) ukazují, že se to mezitím uklidnilo: DifVol Horní 25 mV / Dolní 5 mV, na hlavní BMS obrazovce Alarm:0 / Protection:0 — systém se sám zotavil, bez tvrdého pádu do OFF jako v původním incidentu.
+
+**Nejistota**: propad `min_cell_v` na 2,82 V za ~2 s je fyzikálně podezřele rychlý na reálnou změnu náboje — spíš bych čekal komunikační/CAN glitch než skutečný stav, ale nejde to potvrdit zpětně. Traktujte to jako otevřenou otázku, ne fakt.
+
+### Kritické zjištění: v okamžiku zachycení byl výkon Fronia extrémně stabilní (~4,1 kW, bez mraků)
+
+Tohle mění interpretaci zásadně. **Tahle epizoda nebyla vyvolaná kolísáním PV výkonu** — Fronius jel celou dobu na stabilní ~4,1 kW. Znamená to, že **samotný nabíjecí řídicí algoritmus (rampování CCL po 2A krocích každou ~1 s) osciluje na hraně varování/cutoffu i za naprosto ideálních, stabilních podmínek** — ne jen jako reakce na vnější výkyv.
+
+➡️ **Rezerva je tedy už teď téměř nulová v tom nejlepším možném scénáři.** Až se přidá skutečné kolísání PV výkonu (hrana mraku), je vysoce pravděpodobné, že se efekty sečtou a překročí to i tuhle měkčí, samovolně se zotavující ochranu (Warning → CCL=0 → ramp-up) — směrem k tvrdšímu pádu do OFF, jaký jsme zažili v původním incidentu. Tahle epizoda tak není důkazem, že je systém bezpečný (protože se to samo spravilo) — je to spíš důkaz, že **margin mezi "normální provoz" a "protection trip" je nebezpečně malý**, a bez mraků.
+
+### Důsledek pro návrh řešení
+
+Tohle silně posiluje případ pro `V_buffer_ceiling` řízený napětím (viz níže) — potřebujeme **externí tvrdý strop s marží pod tím, kde tenhle interní rampovací algoritmus začíná dělat problémy**, protože samotný interní algoritmus zjevně nemá dost rezervy vestavěné ani za ideálních podmínek.
+
 ## Kvantifikace mismatche (ze zdrojů)
 
 ### Podle oficiální Victron sizing guidance
